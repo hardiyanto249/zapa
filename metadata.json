@@ -1,0 +1,5 @@
+{
+  "name": "AI Zakat Management Chatbot",
+  "description": "An AI-powered chatbot for Zakat management. Features role-based access control (Admin, User) to perform CRUD operations on Zakat reports using natural language, powered by the Gemini API.",
+  "requestFramePermissions": []
+}
