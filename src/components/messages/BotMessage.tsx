@@ -32,9 +32,35 @@ const ZakatDataTable: React.FC<{ data: Zakat[] }> = ({ data }) => {
         if (currentPage > 1) setCurrentPage(currentPage - 1);
     };
 
+    const exportToCSV = () => {
+        const headers = ["ID", "Kode Relawan", "Nama Muzakki", "Jenis Zakat", "Jumlah (Rp)", "Bukti Transfer", "Tanggal Lapor"];
+        const csvContent = [
+            headers.join(","),
+            ...filteredData.map(row => [
+                row.id,
+                `"${row.volunteerCode}"`,
+                `"${row.muzakkiName}"`,
+                `"${row.zakatType}"`,
+                row.amount,
+                `"${row.proofOfTransfer}"`,
+                `"${new Date(row.createdAt).toLocaleDateString('id-ID')}"`
+            ].join(","))
+        ].join("\n");
+
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", "laporan_zakat.csv");
+        link.style.visibility = "hidden";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
     return (
         <div>
-            <div className="mb-4">
+            <div className="mb-4 flex justify-between items-center">
                 <input
                     type="text"
                     placeholder="Cari berdasarkan Kode Relawan, Nama Muzakki, Jenis Zakat, Jumlah, atau Tanggal..."
@@ -43,8 +69,14 @@ const ZakatDataTable: React.FC<{ data: Zakat[] }> = ({ data }) => {
                         setSearchTerm(e.target.value);
                         setCurrentPage(1); // Reset to first page on search
                     }}
-                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                    className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                 />
+                <button
+                    onClick={exportToCSV}
+                    className="ml-4 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+                >
+                    Export to CSV
+                </button>
             </div>
             <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-600">
@@ -127,9 +159,33 @@ const UserDataTable: React.FC<{ data: User[] }> = ({ data }) => {
         if (currentPage > 1) setCurrentPage(currentPage - 1);
     };
 
+    const exportToCSV = () => {
+        const headers = ["Kode Relawan", "Nama Lengkap", "Nama LAZ", "Keterangan", "Role"];
+        const csvContent = [
+            headers.join(","),
+            ...filteredData.map(row => [
+                `"${row.volunteerCode}"`,
+                `"${row.name}"`,
+                `"${row.lazName}"`,
+                `"${row.description}"`,
+                `"${row.role}"`
+            ].join(","))
+        ].join("\n");
+
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", "daftar_relawan.csv");
+        link.style.visibility = "hidden";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
     return (
         <div>
-            <div className="mb-4">
+            <div className="mb-4 flex justify-between items-center">
                 <input
                     type="text"
                     placeholder="Cari berdasarkan Kode Relawan, Nama Lengkap, Nama LAZ, Keterangan, atau Role..."
@@ -138,8 +194,14 @@ const UserDataTable: React.FC<{ data: User[] }> = ({ data }) => {
                         setSearchTerm(e.target.value);
                         setCurrentPage(1); // Reset to first page on search
                     }}
-                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                    className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                 />
+                <button
+                    onClick={exportToCSV}
+                    className="ml-4 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+                >
+                    Export to CSV
+                </button>
             </div>
             <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-600">

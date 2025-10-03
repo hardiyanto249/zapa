@@ -678,14 +678,31 @@ func lazInfoHandler(w http.ResponseWriter, r *http.Request) {
     w.Write([]byte(info))
 }
 
+// corsMiddleware menambahkan header CORS ke SEMUA response API
 func corsMiddleware(next http.Handler) http.Handler {
+    // kalau mau fleksibel, ambil dari env:
+    allowedOrigin := os.Getenv("ALLOWED_ORIGIN")
+    if allowedOrigin == "" {
+        // fallback: set ke domain produksi
+        allowedOrigin = "https://localhost:3000"
+    }
+
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
+        origin := r.Header.Get("Origin")
+
+        // hanya izinkan origin yang kita tentukan (wajib spesifik jika pakai credentials/cookie)
+        if origin == allowedOrigin {
+            w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+            w.Header().Set("Vary", "Origin") // good practice untuk cache proxy/CDN
+        }
+
         w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        w.Header().Set("Access-Control-Allow-Credentials", "true") // jika pakai cookie/session
 
-        if r.Method == "OPTIONS" {
-            w.WriteHeader(http.StatusNoContent)
+        // Preflight request harus diakhiri di sini
+        if r.Method == http.MethodOptions {
+            w.WriteHeader(http.StatusNoContent) // 204
             return
         }
 
