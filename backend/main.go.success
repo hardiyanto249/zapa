@@ -1,0 +1,102 @@
+package main
+
+import (
+    "context"
+    "encoding/json"
+    "log"
+    "net/http"
+    "os"
+
+    "google.golang.org/genai"
+    "github.com/joho/godotenv"
+)
+
+var (
+    ctx         = context.Background()
+    genaiClient *genai.Client
+    modelName   = "gemini-pro"  // ganti sesuai model yang kamu mau
+)
+
+type ChatRequest struct {
+    Prompt string `json:"prompt"`
+}
+
+type ChatResponse struct {
+    Response string `json:"response"`
+}
+
+func initGemini() {
+    apiKey := os.Getenv("GEMINI_API_KEY")
+    if apiKey == "" {
+        log.Fatal("GEMINI_API_KEY environment variable not set.")
+    }
+
+    var err error
+    genaiClient, err = genai.NewClient(ctx, &genai.ClientConfig{
+        APIKey:  apiKey,
+        Backend: genai.BackendGeminiAPI,
+    })
+    if err != nil {
+        log.Fatalf("Error creating GenAI client: %v", err)
+    }
+    log.Println("GenAI client initialized.")
+}
+
+func chatHandler(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+
+    var req ChatRequest
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, "Invalid request body", http.StatusBadRequest)
+        return
+    }
+
+    // Bangun “contents” sebagai slice dari *genai.Content
+    contents := []*genai.Content{
+        {
+            Parts: []*genai.Part{
+                {Text: req.Prompt},  // ini asumsi Part memiliki field Text
+            },
+        },
+    }
+
+    resp, err := genaiClient.Models.GenerateContent(ctx, modelName, contents, nil)
+    if err != nil {
+        log.Printf("Error GenerateContent via Models: %v", err)
+        http.Error(w, "Failed to generate content", http.StatusInternalServerError)
+        return
+    }
+
+    // Ambil teks dari hasil
+    reply := ""
+    for _, cand := range resp.Candidates {
+        if cand.Content != nil {
+            for _, part := range cand.Content.Parts {
+                // Asumsi part.Text ada
+                reply += part.Text
+            }
+        }
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(ChatResponse{Response: reply})
+}
+
+func main() {
+    _ = godotenv.Load("../.env")
+
+    initGemini()
+
+    http.HandleFunc("/api/chat", chatHandler)
+
+    port := os.Getenv("PORT")
+    if port == "" {
+        port = "8080"
+    }
+
+    log.Printf("Server running on port %s...", port)
+    log.Fatal(http.ListenAndServe(":"+port, nil))
+}

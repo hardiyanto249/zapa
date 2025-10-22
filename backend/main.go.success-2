@@ -1,0 +1,213 @@
+package main
+
+import (
+    "context"
+    "database/sql"
+    "encoding/json"
+    "io"
+    "log"
+    "net/http"
+    "os"
+
+    "github.com/joho/godotenv"
+    "google.golang.org/genai"
+    _ "github.com/lib/pq"
+)
+
+var (
+    ctx         = context.Background()
+    genaiClient *genai.Client
+    modelName   = "gemini-pro"
+    db          *sql.DB
+)
+
+type ChatRequest struct {
+    Prompt string `json:"prompt"`
+}
+
+type ChatResponse struct {
+    Response string `json:"response"`
+}
+
+// Add these structs near your other structs (ChatRequest, etc.)
+type LoginRequest struct {
+    VolunteerCode string `json:"volunteerCode"`
+    Password string `json:"password"`
+}
+
+type LoginResponse struct {
+    Message string `json:"message"`
+    Token   string `json:"token,omitempty"` // `omitempty` means it won't be in the JSON if it's empty
+}
+
+func initDB() {
+    dbURL := os.Getenv("DATABASE_URL")
+    if dbURL == "" {
+        log.Fatal("DATABASE_URL not set")
+    }
+    var err error
+    db, err = sql.Open("postgres", dbURL)
+    if err != nil {
+        log.Fatalf("Failed to open DB: %v", err)
+    }
+    if err = db.Ping(); err != nil {
+        log.Fatalf("Failed to ping DB: %v", err)
+    }
+    log.Println("Database connected successfully.")
+}
+
+func initGemini() {
+    apiKey := os.Getenv("GEMINI_API_KEY")
+    if apiKey == "" {
+        log.Fatal("GEMINI_API_KEY environment variable not set.")
+    }
+    var err error
+    genaiClient, err = genai.NewClient(ctx, &genai.ClientConfig{
+        APIKey:  apiKey,
+        Backend: genai.BackendGeminiAPI,
+    })
+    if err != nil {
+        log.Fatalf("Error creating GenAI client: %v", err)
+    }
+    log.Println("GenAI client initialized.")
+}
+
+func chatHandler(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+
+    var req ChatRequest
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, "Invalid request body", http.StatusBadRequest)
+        return
+    }
+
+    contents := []*genai.Content{
+        {
+            Parts: []*genai.Part{
+                {Text: req.Prompt},
+            },
+        },
+    }
+
+    resp, err := genaiClient.Models.GenerateContent(ctx, modelName, contents, nil)
+    if err != nil {
+        log.Printf("Error generating content: %v", err)
+        http.Error(w, "Failed to generate content", http.StatusInternalServerError)
+        return
+    }
+
+    reply := ""
+    for _, cand := range resp.Candidates {
+        if cand.Content != nil {
+            for _, part := range cand.Content.Parts {
+                reply += part.Text
+            }
+        }
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(ChatResponse{Response: reply})
+}
+
+// REPLACE your old loginHandler with this new one
+func loginHandler(w http.ResponseWriter, r *http.Request) {
+    // 1. Ensure it's a POST request
+    if r.Method != http.MethodPost {
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+
+    // 2. Decode the incoming JSON request
+    var req LoginRequest
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, "Invalid request body", http.StatusBadRequest)
+        return
+    }
+
+    // 3. Query the database for the user
+    var storedPassword string
+    // IMPORTANT: Your 'users' table must have 'volunteer_code' and 'password' columns
+    err := db.QueryRow("SELECT password FROM users WHERE volunteer_code = $1", req.VolunteerCode).Scan(&storedPassword)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            // User not found
+            http.Error(w, "Invalid volunteer_code or password", http.StatusUnauthorized)
+        } else {
+            // Some other database error
+            log.Printf("Database error during login: %v", err)
+            http.Error(w, "Internal server error", http.StatusInternalServerError)
+        }
+        return
+    }
+
+    // 4. Compare the provided password with the stored hash
+    // !!! SECURITY WARNING !!!
+    // You should NEVER store passwords in plain text.
+    // Use a library like 'golang.org/x/crypto/bcrypt' to hash and compare passwords.
+    //
+    // To use bcrypt, first add it to your imports: "golang.org/x/crypto/bcrypt"
+    // Then replace the plain text comparison with this:
+    //
+    // err = bcrypt.CompareHashAndPassword([]byte(storedPassword), []byte(req.Password))
+    // if err != nil {
+    //     http.Error(w, "Invalid username or password", http.StatusUnauthorized)
+    //     return
+    // }
+    //
+    // For now, we will do a simple (INSECURE) comparison:
+    if req.Password != storedPassword {
+        http.Error(w, "Invalid username or password", http.StatusUnauthorized)
+        return
+    }
+
+    // 5. (Optional but Recommended) Generate a JWT Token for the session
+    // For now, we'll just return a success message.
+    // In a real app, you would generate a token here.
+    token := "a-secure-jwt-token-would-go-here"
+
+    // 6. Send a success response
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(LoginResponse{
+        Message: "Login successful!",
+        Token:   token,
+    })
+}
+
+func usersHandler(w http.ResponseWriter, r *http.Request) {
+    w.WriteHeader(http.StatusNotImplemented)
+    io.WriteString(w, "Users handler not implemented.")
+}
+
+func zakatHandler(w http.ResponseWriter, r *http.Request) {
+    w.WriteHeader(http.StatusNotImplemented)
+    io.WriteString(w, "Zakat handler not implemented.")
+}
+
+func main() {
+    _ = godotenv.Load("../.env")
+
+    initGemini()
+    initDB()
+    defer db.Close()
+
+    mux := http.NewServeMux()
+    mux.HandleFunc("/api/chat", chatHandler)
+    //mux.HandleFunc("/api/login", loginHandler)
+    mux.HandleFunc("/api/users", usersHandler)
+    mux.HandleFunc("/api/zakat", zakatHandler)
+    //http.HandleFunc("/api/chat", chatHandler)
+    http.HandleFunc("/api/login", loginHandler)
+    //http.HandleFunc("/api/users", usersHandler)
+    //http.HandleFunc("/api/zakat", zakatHandler)
+
+    port := os.Getenv("PORT")
+    if port == "" {
+        port = "8081"
+    }
+
+    log.Printf("Server running on port %s...", port)
+    log.Fatal(http.ListenAndServe(":"+port, nil))
+}
