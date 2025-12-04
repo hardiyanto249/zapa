@@ -58,6 +58,37 @@ type ChatResponse struct {
 	// Anda dapat menambahkan field lain di sini sesuai kebutuhan, mis. data untuk dirender sebagai komponen
 }
 
+// ============================================
+// LIVE CHAT STRUCTS
+// ============================================
+
+type ChatSession struct {
+	ID                 int       `json:"id"`
+	UserVolunteerCode  string    `json:"userVolunteerCode"`
+	UserName           string    `json:"userName"`
+	AdminVolunteerCode string    `json:"adminVolunteerCode,omitempty"`
+	AdminName          string    `json:"adminName,omitempty"`
+	Status             string    `json:"status"` // waiting, connected, closed
+	CreatedAt          string    `json:"createdAt"`
+	ClosedAt           string    `json:"closedAt,omitempty"`
+}
+
+type ChatMessage struct {
+	ID         int    `json:"id"`
+	SessionID  int    `json:"sessionId"`
+	Sender     string `json:"sender"`
+	SenderName string `json:"senderName"`
+	Message    string `json:"message"`
+	CreatedAt  string `json:"createdAt"`
+}
+
+type AdminStatus struct {
+	VolunteerCode string `json:"volunteerCode"`
+	Name          string `json:"name"`
+	IsOnline      bool   `json:"isOnline"`
+	LastSeen      string `json:"lastSeen"`
+}
+
 func authenticateUser(volunteerCode, password string) (*User, error) {
 	var user User
 	err := db.QueryRow("SELECT volunteer_code, name, laz_name, description, role FROM users WHERE volunteer_code = $1 AND password = $2", volunteerCode, password).Scan(&user.VolunteerCode, &user.Name, &user.LazName, &user.Description, &user.Role)
@@ -202,6 +233,172 @@ func deleteZakatRecord(id int, currentUser *User) error {
 	}
 	_, err = db.Exec("DELETE FROM zakat WHERE id = $1", id)
 	return err
+}
+
+// ============================================
+// LIVE CHAT DB FUNCTIONS
+// ============================================
+
+func createChatSession(user User) (*ChatSession, error) {
+	var session ChatSession
+	err := db.QueryRow(`
+		INSERT INTO chat_sessions (user_volunteer_code, user_name, status) 
+		VALUES ($1, $2, 'waiting') 
+		RETURNING id, user_volunteer_code, user_name, status, created_at`, 
+		user.VolunteerCode, user.Name).Scan(&session.ID, &session.UserVolunteerCode, &session.UserName, &session.Status, &session.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &session, nil
+}
+
+func getChatSession(id int) (*ChatSession, error) {
+	var session ChatSession
+	var adminCode sql.NullString
+	var adminName sql.NullString
+	var closedAt sql.NullString
+
+	err := db.QueryRow(`
+		SELECT id, user_volunteer_code, user_name, admin_volunteer_code, admin_name, status, created_at, closed_at 
+		FROM chat_sessions WHERE id = $1`, id).Scan(
+			&session.ID, &session.UserVolunteerCode, &session.UserName, 
+			&adminCode, &adminName, &session.Status, &session.CreatedAt, &closedAt)
+	
+	if err != nil {
+		return nil, err
+	}
+
+	if adminCode.Valid {
+		session.AdminVolunteerCode = adminCode.String
+	}
+	if adminName.Valid {
+		session.AdminName = adminName.String
+	}
+	if closedAt.Valid {
+		session.ClosedAt = closedAt.String
+	}
+
+	return &session, nil
+}
+
+func closeChatSession(id int) error {
+	_, err := db.Exec("UPDATE chat_sessions SET status = 'closed', closed_at = CURRENT_TIMESTAMP WHERE id = $1", id)
+	return err
+}
+
+func saveChatMessage(msg ChatMessage) (*ChatMessage, error) {
+	err := db.QueryRow(`
+		INSERT INTO chat_messages (session_id, sender, sender_name, message) 
+		VALUES ($1, $2, $3, $4) 
+		RETURNING id, created_at`, 
+		msg.SessionID, msg.Sender, msg.SenderName, msg.Message).Scan(&msg.ID, &msg.CreatedAt)
+	return &msg, err
+}
+
+func getChatMessages(sessionId int) ([]ChatMessage, error) {
+	rows, err := db.Query("SELECT id, session_id, sender, sender_name, message, created_at FROM chat_messages WHERE session_id = $1 ORDER BY created_at ASC", sessionId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var messages []ChatMessage
+	for rows.Next() {
+		var msg ChatMessage
+		if err := rows.Scan(&msg.ID, &msg.SessionID, &msg.Sender, &msg.SenderName, &msg.Message, &msg.CreatedAt); err != nil {
+			return nil, err
+		}
+		messages = append(messages, msg)
+	}
+	return messages, nil
+}
+
+func updateAdminStatus(code string, name string, isOnline bool) error {
+	_, err := db.Exec(`
+		INSERT INTO admin_online_status (volunteer_code, name, is_online, last_seen) 
+		VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+		ON CONFLICT (volunteer_code) 
+		DO UPDATE SET is_online = $3, last_seen = CURRENT_TIMESTAMP`, 
+		code, name, isOnline)
+	return err
+}
+
+func getOnlineAdmins() ([]AdminStatus, error) {
+	rows, err := db.Query("SELECT volunteer_code, name, is_online, last_seen FROM admin_online_status WHERE is_online = true AND last_seen > NOW() - INTERVAL '1 hour'")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var admins []AdminStatus
+	for rows.Next() {
+		var admin AdminStatus
+		if err := rows.Scan(&admin.VolunteerCode, &admin.Name, &admin.IsOnline, &admin.LastSeen); err != nil {
+			return nil, err
+		}
+		admins = append(admins, admin)
+	}
+	return admins, nil
+}
+
+func getPendingChatRequests() ([]ChatSession, error) {
+	rows, err := db.Query("SELECT id, user_volunteer_code, user_name, status, created_at FROM chat_sessions WHERE status = 'waiting' ORDER BY created_at ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []ChatSession
+	for rows.Next() {
+		var s ChatSession
+		if err := rows.Scan(&s.ID, &s.UserVolunteerCode, &s.UserName, &s.Status, &s.CreatedAt); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, s)
+	}
+	return sessions, nil
+}
+
+func acceptChatRequest(sessionId int, admin User) error {
+	result, err := db.Exec(`
+		UPDATE chat_sessions 
+		SET status = 'connected', admin_volunteer_code = $1, admin_name = $2 
+		WHERE id = $3 AND status = 'waiting'`, 
+		admin.VolunteerCode, admin.Name, sessionId)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found or already taken")
+	}
+	return nil
+}
+
+func getAdminActiveSessions(adminCode string) ([]ChatSession, error) {
+	rows, err := db.Query(`
+		SELECT id, user_volunteer_code, user_name, admin_volunteer_code, admin_name, status, created_at 
+		FROM chat_sessions 
+		WHERE admin_volunteer_code = $1 AND status = 'connected' 
+		ORDER BY created_at DESC`, adminCode)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []ChatSession
+	for rows.Next() {
+		var s ChatSession
+		var adminCode sql.NullString
+		var adminName sql.NullString
+		if err := rows.Scan(&s.ID, &s.UserVolunteerCode, &s.UserName, &adminCode, &adminName, &s.Status, &s.CreatedAt); err != nil {
+			return nil, err
+		}
+		if adminCode.Valid { s.AdminVolunteerCode = adminCode.String }
+		if adminName.Valid { s.AdminName = adminName.String }
+		sessions = append(sessions, s)
+	}
+	return sessions, nil
 }
 
 // callGemini function 
@@ -750,6 +947,247 @@ func lazInfoHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(info))
 }
 
+// ============================================
+// LIVE CHAT HANDLERS
+// ============================================
+
+func chatRequestHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		UserVolunteerCode string `json:"userVolunteerCode"`
+		UserName          string `json:"userName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	user := User{VolunteerCode: req.UserVolunteerCode, Name: req.UserName}
+	session, err := createChatSession(user)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(session)
+}
+
+func chatSessionHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/chat/session/")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	session, err := getChatSession(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(session)
+}
+
+func chatCloseHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		SessionID int `json:"sessionId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := closeChatSession(req.SessionID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func chatMessagesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/chat/messages/")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	messages, err := getChatMessages(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(messages)
+}
+
+func chatSendHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var msg ChatMessage
+	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	savedMsg, err := saveChatMessage(msg)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(savedMsg)
+}
+
+func adminStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Auth check (simple)
+	auth := r.Header.Get("Authorization")
+	if auth == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	volunteerCode := strings.TrimPrefix(auth, "Bearer ")
+
+	var req struct {
+		IsOnline bool `json:"isOnline"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Get admin name
+	var name string
+	err := db.QueryRow("SELECT name FROM users WHERE volunteer_code = $1", volunteerCode).Scan(&name)
+	if err != nil {
+		http.Error(w, "User not found", http.StatusUnauthorized)
+		return
+	}
+
+	if err := updateAdminStatus(volunteerCode, name, req.IsOnline); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func adminOnlineHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	admins, err := getOnlineAdmins()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"admins": admins})
+}
+
+func chatPendingHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	sessions, err := getPendingChatRequests()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"sessions": sessions})
+}
+
+func chatAcceptHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		SessionID          int    `json:"sessionId"`
+		AdminVolunteerCode string `json:"adminVolunteerCode"`
+		AdminName          string `json:"adminName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	admin := User{VolunteerCode: req.AdminVolunteerCode, Name: req.AdminName}
+	if err := acceptChatRequest(req.SessionID, admin); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	session, err := getChatSession(req.SessionID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(session)
+}
+
+func chatAdminActiveHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	auth := r.Header.Get("Authorization")
+	volunteerCode := strings.TrimPrefix(auth, "Bearer ")
+
+	sessions, err := getAdminActiveSessions(volunteerCode)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"sessions": sessions})
+}
+
 // corsMiddleware menambahkan header CORS ke SEMUA response API
 func corsMiddleware(next http.Handler) http.Handler {
     // Set a safe fallback to your production domain
@@ -797,6 +1235,18 @@ func main() {
 	mux.HandleFunc("/api/users", usersHandler)
 	mux.HandleFunc("/api/zakat", zakatHandler)
 	mux.HandleFunc("/api/laz-info", lazInfoHandler)
+
+	// Live Chat Routes
+	mux.HandleFunc("/api/chat/request", chatRequestHandler)
+	mux.HandleFunc("/api/chat/session/", chatSessionHandler)
+	mux.HandleFunc("/api/chat/close", chatCloseHandler)
+	mux.HandleFunc("/api/chat/messages/", chatMessagesHandler)
+	mux.HandleFunc("/api/chat/send", chatSendHandler)
+	mux.HandleFunc("/api/admin/status", adminStatusHandler)
+	mux.HandleFunc("/api/admin/online", adminOnlineHandler)
+	mux.HandleFunc("/api/chat/pending", chatPendingHandler)
+	mux.HandleFunc("/api/chat/accept", chatAcceptHandler)
+	mux.HandleFunc("/api/chat/admin/active", chatAdminActiveHandler)
 
 	handler := corsMiddleware(mux)
 

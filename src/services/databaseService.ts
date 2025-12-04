@@ -101,6 +101,24 @@ const updateUser = async (
   throw new Error('Update user belum didukung di backend. Tambahkan endpoint PUT /api/users terlebih dahulu.');
 };
 
+const deleteUser = async (
+  { volunteerCode }: { volunteerCode: string },
+  currentUser: User | null
+): Promise<string> => {
+  if (!currentUser) throw new Error('Akses ditolak.');
+
+  // Validasi role admin
+  if (currentUser.role !== 'admin') {
+    throw new Error('Anda tidak memiliki izin untuk menghapus user. Hanya admin yang dapat menghapus user.');
+  }
+
+  await http<void>(`${API_BASE}/users/${volunteerCode}`, {
+    method: 'DELETE',
+    headers: { ...getAuthHeader(currentUser) },
+  });
+  return `Berhasil menghapus relawan dengan kode ${volunteerCode}.`;
+};
+
 // --- Zakat ---
 const getZakatRecords = async (
   _args: {},
@@ -147,6 +165,11 @@ const updateZakatRecord = async (
 ): Promise<Zakat> => {
   if (!currentUser) throw new Error('Akses ditolak.');
 
+  // Validasi role admin
+  if (currentUser.role !== 'admin') {
+    throw new Error('Anda tidak memiliki izin untuk mengupdate data zakat. Hanya admin yang dapat mengupdate data.');
+  }
+
   // ❗ Backend kamu: PUT /api/zakat (tanpa /:id), body: { id, updates }
   const { id, ...updates } = args;
   return await http<Zakat>(`${API_BASE}/zakat`, {
@@ -165,6 +188,12 @@ const deleteZakatRecord = async (
   currentUser: User | null
 ): Promise<string> => {
   if (!currentUser) throw new Error('Akses ditolak.');
+
+  // Validasi role admin
+  if (currentUser.role !== 'admin') {
+    throw new Error('Anda tidak memiliki izin untuk menghapus data zakat. Hanya admin yang dapat menghapus data.');
+  }
+
   await http<void>(`${API_BASE}/zakat/${id}`, {
     method: 'DELETE',
     headers: { ...getAuthHeader(currentUser) },
@@ -181,6 +210,7 @@ const availableFunctions: Record<string, (args: any, currentUser: User | null) =
   add_user: addUser,
   get_all_users: getAllUsers,
   update_user: updateUser, // akan melempar error terarah sampai backend mendukung
+  delete_user: deleteUser,
   get_laz_info: async () => 'This function is handled on the backend.',
 };
 
