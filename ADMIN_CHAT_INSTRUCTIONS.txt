@@ -1,0 +1,62 @@
+// INSTRUKSI: Tambahkan kode berikut ke src/App.tsx
+
+// ========================================
+// 1. TAMBAHKAN STATE (setelah line 30: const [liveChatSession, ...])
+// ========================================
+const [pendingRequests, setPendingRequests] = useState<ChatSession[]>([]);
+const [isAcceptingChat, setIsAcceptingChat] = useState(false);
+
+// ========================================
+// 2. TAMBAHKAN USEEFFECT UNTUK POLLING (setelah semua useCallback, sebelum handleLoginSuccess)
+// ========================================
+// Poll for pending chat requests (Admin only)
+useEffect(() => {
+  if (currentUser?.role !== 'admin' || chatMode !== 'bot') return;
+
+  const pollRequests = async () => {
+    try {
+      const requests = await getPendingChatRequests(currentUser);
+      setPendingRequests(requests);
+    } catch (err) {
+      console.error('Error polling chat requests:', err);
+    }
+  };
+
+  // Poll immediately
+  pollRequests();
+
+  // Then poll every 3 seconds
+  const interval = setInterval(pollRequests, 3000);
+
+  return () => clearInterval(interval);
+}, [currentUser, chatMode]);
+
+// ========================================
+// 3. TAMBAHKAN HANDLER (setelah handleContactAdmin, sebelum handleLogout)
+// ========================================
+const handleAcceptChat = async (sessionId: number) => {
+  setIsAcceptingChat(true);
+  try {
+    const session = await acceptChatRequest(sessionId, currentUser!);
+    setLiveChatSession(session);
+    setChatMode('admin');
+    setPendingRequests(prev => prev.filter(req => req.id !== sessionId));
+  } catch (error) {
+    console.error('Error accepting chat:', error);
+    alert('Gagal menerima chat. Silakan coba lagi.');
+  } finally {
+    setIsAcceptingChat(false);
+  }
+};
+
+// ========================================
+// 4. TAMBAHKAN RENDER COMPONENT (di dalam return, setelah tombol "Hubungi Admin", sebelum closing tag LiveChatPanel)
+// ========================================
+{/* Admin Chat Notification (Feature-Flagged) */}
+{FEATURES.LIVE_CHAT_ENABLED && currentUser?.role === 'admin' && chatMode === 'bot' && (
+  <AdminChatNotification
+    pendingRequests={pendingRequests}
+    onAccept={handleAcceptChat}
+    isProcessing={isAcceptingChat}
+  />
+)}

@@ -16,7 +16,8 @@ import {
 } from './constants';
 // Live Chat imports (isolated, feature-flagged)
 import { LiveChatPanel } from './components/LiveChatPanel';
-import { requestLiveChatSession, getOnlineAdmins } from './services/liveChatService';
+import { AdminChatNotification } from './components/AdminChatNotification';
+import { requestLiveChatSession, getOnlineAdmins, getPendingChatRequests, acceptChatRequest } from './services/liveChatService';
 
 const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -28,6 +29,8 @@ const App: React.FC = () => {
   // Live Chat state (NEW - feature-flagged)
   const [chatMode, setChatMode] = useState<ChatMode>('bot');
   const [liveChatSession, setLiveChatSession] = useState<ChatSession | null>(null);
+  const [pendingRequests, setPendingRequests] = useState<ChatSession[]>([]);
+  const [isAcceptingChat, setIsAcceptingChat] = useState(false);
 
   const addBotMessage = (text: string, isComponent: boolean = false) => {
     setMessages(prev => [...prev, {
@@ -630,8 +633,19 @@ Apakah data sudah benar dan ingin dilanjutkan? (ya/tidak)`;
     handleIdleState
   ]);
 
-  const handleLoginSuccess = (user: User) => {
+  const handleLoginSuccess = async (user: User) => {
     setCurrentUser(user);
+
+    // If user is admin, set status to online
+    if (user.role === 'admin') {
+      try {
+        const { updateAdminStatus } = await import('./services/liveChatService');
+        await updateAdminStatus(user.volunteerCode, true);
+        console.log('Admin status set to online');
+      } catch (err) {
+        console.error('Failed to set admin status:', err);
+      }
+    }
     const welcomeMessage = `Assalamualaikum, ${user.name}! Anda login sebagai ${user.role}. Saya Bang Zapa, asisten pribadi zakat Anda. Saya siap membantu Anda.\n\nContoh perintah:\n- 'Tampilkan semua laporan zakat'\n- 'Tambah laporan zakat'\n- 'Siapa saja yang berhak menerima zakat?'`;
 
     const adminCommands = `\n- 'Tampilkan semua relawan'\n- 'Tambah relawan baru'`;
@@ -666,7 +680,55 @@ Apakah data sudah benar dan ingin dilanjutkan? (ya/tidak)`;
     }
   };
 
-  const handleLogout = () => {
+  // Poll for pending chat requests (Admin only)
+  useEffect(() => {
+    if (currentUser?.role !== 'admin' || chatMode !== 'bot') return;
+
+    const pollRequests = async () => {
+      try {
+        const requests = await getPendingChatRequests(currentUser);
+        setPendingRequests(requests);
+      } catch (err) {
+        console.error('Error polling chat requests:', err);
+      }
+    };
+
+    // Poll immediately
+    pollRequests();
+
+    // Then poll every 3 seconds
+    const interval = setInterval(pollRequests, 3000);
+
+    return () => clearInterval(interval);
+  }, [currentUser, chatMode]);
+
+  const handleAcceptChat = async (sessionId: number) => {
+    setIsAcceptingChat(true);
+    try {
+      const session = await acceptChatRequest(sessionId, currentUser!);
+      setLiveChatSession(session);
+      setChatMode('admin');
+      setPendingRequests(prev => prev.filter(req => req.id !== sessionId));
+    } catch (error) {
+      console.error('Error accepting chat:', error);
+      alert('Gagal menerima chat. Silakan coba lagi.');
+    } finally {
+      setIsAcceptingChat(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    // If user is admin, set status to offline before clearing state
+    if (currentUser?.role === 'admin') {
+      try {
+        const { updateAdminStatus } = await import('./services/liveChatService');
+        await updateAdminStatus(currentUser.volunteerCode, false);
+        console.log('Admin status set to offline');
+      } catch (err) {
+        console.error('Failed to set admin offline status:', err);
+      }
+    }
+
     setCurrentUser(null);
     setMessages([]);
     setConversationContext(initialConversationContext);
@@ -717,6 +779,15 @@ Apakah data sudah benar dan ingin dilanjutkan? (ya/tidak)`;
               <span className="text-xl">💬</span>
               <span className="font-semibold">Hubungi Admin</span>
             </button>
+          )}
+
+          {/* Admin Chat Notification (Feature-Flagged) */}
+          {FEATURES.LIVE_CHAT_ENABLED && currentUser?.role === 'admin' && chatMode === 'bot' && (
+            <AdminChatNotification
+              pendingRequests={pendingRequests}
+              onAccept={handleAcceptChat}
+              isProcessing={isAcceptingChat}
+            />
           )}
         </>
       ) : (

@@ -26,6 +26,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const [currentSession, setCurrentSession] = useState<ChatSession>(session);
 
     // Load messages on mount and poll for new messages
     useEffect(() => {
@@ -37,6 +38,35 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
         return () => clearInterval(interval);
     }, [session.id]);
 
+    // Poll for session status updates (to detect when admin accepts)
+    useEffect(() => {
+        const pollSessionStatus = async () => {
+            try {
+                // Fetch updated session info
+                const response = await fetch(`${import.meta.env.VITE_API_URL}/api/chat/session/${session.id}`, {
+                    headers: {
+                        'Authorization': `Bearer ${currentUser.volunteerCode}`,
+                    },
+                });
+
+                if (response.ok) {
+                    const updatedSession = await response.json();
+                    setCurrentSession(updatedSession);
+                }
+            } catch (err) {
+                console.error('Error polling session status:', err);
+            }
+        };
+
+        // Poll immediately
+        pollSessionStatus();
+
+        // Then poll every 2 seconds
+        const interval = setInterval(pollSessionStatus, 2000);
+
+        return () => clearInterval(interval);
+    }, [session.id, currentUser.volunteerCode]);
+
     // Auto-scroll to bottom when new messages arrive
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -45,11 +75,12 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
     const loadMessages = async () => {
         try {
             const msgs = await getChatMessages(session.id, currentUser);
-            setMessages(msgs);
+            setMessages(msgs || []);
             setError(null);
         } catch (err) {
             console.error('Error loading messages:', err);
             // Don't show error for polling failures
+            setMessages([]); // Ensure messages is always an array
         }
     };
 
@@ -86,7 +117,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
     };
 
     const getStatusBadge = () => {
-        switch (session.status) {
+        switch (currentSession.status) {
             case 'waiting':
                 return (
                     <span className="px-3 py-1 bg-yellow-600 text-white text-sm rounded-full">
@@ -96,7 +127,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
             case 'connected':
                 return (
                     <span className="px-3 py-1 bg-green-600 text-white text-sm rounded-full">
-                        ✅ Terhubung dengan {session.adminName || 'Admin'}
+                        ✅ Terhubung dengan {currentSession.adminName || 'Admin'}
                     </span>
                 );
             case 'closed':
@@ -121,7 +152,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
                         <button
                             onClick={handleCloseChat}
                             className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-                            disabled={session.status === 'closed'}
+                            disabled={currentSession.status === 'closed'}
                         >
                             🔚 Akhiri Chat
                         </button>
@@ -137,7 +168,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
 
             {/* Messages Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {session.status === 'waiting' && (
+                {currentSession.status === 'waiting' && (
                     <div className="text-center text-gray-400 py-8">
                         <div className="text-4xl mb-4">⏳</div>
                         <p className="text-lg">Mencari admin yang tersedia...</p>
@@ -145,7 +176,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
                     </div>
                 )}
 
-                {messages.map((msg) => {
+                {(messages || []).map((msg) => {
                     const isCurrentUser = msg.sender === currentUser.volunteerCode;
 
                     return (
@@ -155,8 +186,8 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
                         >
                             <div
                                 className={`max-w-[70%] rounded-lg p-3 ${isCurrentUser
-                                        ? 'bg-blue-600 text-white'
-                                        : 'bg-gray-700 text-white'
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-700 text-white'
                                     }`}
                             >
                                 <div className="text-xs opacity-75 mb-1">
@@ -185,7 +216,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
             )}
 
             {/* Input Area */}
-            {session.status !== 'closed' && (
+            {currentSession.status !== 'closed' && (
                 <div className="bg-gray-800 border-t border-gray-700 p-4">
                     <form onSubmit={handleSendMessage} className="flex gap-2">
                         <input
@@ -193,16 +224,16 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
                             value={inputText}
                             onChange={(e) => setInputText(e.target.value)}
                             placeholder={
-                                session.status === 'waiting'
+                                currentSession.status === 'waiting'
                                     ? 'Menunggu admin...'
                                     : 'Ketik pesan Anda...'
                             }
-                            disabled={isLoading || session.status === 'waiting'}
+                            disabled={isLoading || currentSession.status === 'waiting'}
                             className="flex-1 px-4 py-2 bg-gray-700 text-white border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                         />
                         <button
                             type="submit"
-                            disabled={isLoading || !inputText.trim() || session.status === 'waiting'}
+                            disabled={isLoading || !inputText.trim() || currentSession.status === 'waiting'}
                             className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {isLoading ? '⏳' : '📤'} Kirim
@@ -211,7 +242,7 @@ export const LiveChatPanel: React.FC<LiveChatPanelProps> = ({
                 </div>
             )}
 
-            {session.status === 'closed' && (
+            {currentSession.status === 'closed' && (
                 <div className="bg-gray-800 border-t border-gray-700 p-4 text-center text-gray-400">
                     Chat telah ditutup. Klik "Tutup" untuk kembali ke chat AI.
                 </div>

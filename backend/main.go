@@ -1,22 +1,22 @@
 package main
 
 import (
-    "context"
-    "database/sql"
-    "encoding/json"
-    "fmt"
-    "io"
-    "log"
-    "net/http"
-    "os"
-    "strconv"
-    "strings"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
 
-    "github.com/PuerkitoBio/goquery"
-    "github.com/google/generative-ai-go/genai"
-    "github.com/joho/godotenv"
-    _ "github.com/lib/pq"
-    "google.golang.org/api/option"
+	"github.com/PuerkitoBio/goquery"
+	"github.com/google/generative-ai-go/genai"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
+	"google.golang.org/api/option"
 )
 
 var db *sql.DB
@@ -46,9 +46,9 @@ type Zakat struct {
 
 // ChatRequest mendefinisikan struktur data yang kita harapkan dari frontend
 type ChatRequest struct {
-    Contents []map[string]interface{} `json:"contents"`
-    Instruction string                `json:"instruction"`
-    CurrentUser map[string]interface{} `json:"currentUser"`
+	Contents    []map[string]interface{} `json:"contents"`
+	Instruction string                   `json:"instruction"`
+	CurrentUser map[string]interface{}   `json:"currentUser"`
 }
 
 // ChatResponse mendefinisikan struktur data yang akan kita kirim kembali ke frontend
@@ -63,14 +63,14 @@ type ChatResponse struct {
 // ============================================
 
 type ChatSession struct {
-	ID                 int       `json:"id"`
-	UserVolunteerCode  string    `json:"userVolunteerCode"`
-	UserName           string    `json:"userName"`
-	AdminVolunteerCode string    `json:"adminVolunteerCode,omitempty"`
-	AdminName          string    `json:"adminName,omitempty"`
-	Status             string    `json:"status"` // waiting, connected, closed
-	CreatedAt          string    `json:"createdAt"`
-	ClosedAt           string    `json:"closedAt,omitempty"`
+	ID                 int    `json:"id"`
+	UserVolunteerCode  string `json:"userVolunteerCode"`
+	UserName           string `json:"userName"`
+	AdminVolunteerCode string `json:"adminVolunteerCode,omitempty"`
+	AdminName          string `json:"adminName,omitempty"`
+	Status             string `json:"status"` // waiting, connected, closed
+	CreatedAt          string `json:"createdAt"`
+	ClosedAt           string `json:"closedAt,omitempty"`
 }
 
 type ChatMessage struct {
@@ -104,7 +104,7 @@ func getAllUsers() ([]User, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var users []User
+	users := []User{} // Initialize as empty array instead of nil
 	for rows.Next() {
 		var user User
 		err := rows.Scan(&user.VolunteerCode, &user.Name, &user.LazName, &user.Description, &user.Role)
@@ -177,7 +177,7 @@ func getZakatRecords(currentUser *User) ([]Zakat, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var zakats []Zakat
+	zakats := []Zakat{} // Initialize as empty array instead of nil
 	for rows.Next() {
 		var z Zakat
 		err := rows.Scan(&z.ID, &z.VolunteerCode, &z.MuzakkiName, &z.ZakatType, &z.Amount, &z.ProofOfTransfer, &z.CreatedAt)
@@ -244,7 +244,7 @@ func createChatSession(user User) (*ChatSession, error) {
 	err := db.QueryRow(`
 		INSERT INTO chat_sessions (user_volunteer_code, user_name, status) 
 		VALUES ($1, $2, 'waiting') 
-		RETURNING id, user_volunteer_code, user_name, status, created_at`, 
+		RETURNING id, user_volunteer_code, user_name, status, created_at`,
 		user.VolunteerCode, user.Name).Scan(&session.ID, &session.UserVolunteerCode, &session.UserName, &session.Status, &session.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -261,9 +261,9 @@ func getChatSession(id int) (*ChatSession, error) {
 	err := db.QueryRow(`
 		SELECT id, user_volunteer_code, user_name, admin_volunteer_code, admin_name, status, created_at, closed_at 
 		FROM chat_sessions WHERE id = $1`, id).Scan(
-			&session.ID, &session.UserVolunteerCode, &session.UserName, 
-			&adminCode, &adminName, &session.Status, &session.CreatedAt, &closedAt)
-	
+		&session.ID, &session.UserVolunteerCode, &session.UserName,
+		&adminCode, &adminName, &session.Status, &session.CreatedAt, &closedAt)
+
 	if err != nil {
 		return nil, err
 	}
@@ -290,7 +290,7 @@ func saveChatMessage(msg ChatMessage) (*ChatMessage, error) {
 	err := db.QueryRow(`
 		INSERT INTO chat_messages (session_id, sender, sender_name, message) 
 		VALUES ($1, $2, $3, $4) 
-		RETURNING id, created_at`, 
+		RETURNING id, created_at`,
 		msg.SessionID, msg.Sender, msg.SenderName, msg.Message).Scan(&msg.ID, &msg.CreatedAt)
 	return &msg, err
 }
@@ -302,7 +302,7 @@ func getChatMessages(sessionId int) ([]ChatMessage, error) {
 	}
 	defer rows.Close()
 
-	var messages []ChatMessage
+	messages := []ChatMessage{} // Initialize as empty array instead of nil
 	for rows.Next() {
 		var msg ChatMessage
 		if err := rows.Scan(&msg.ID, &msg.SessionID, &msg.Sender, &msg.SenderName, &msg.Message, &msg.CreatedAt); err != nil {
@@ -318,7 +318,7 @@ func updateAdminStatus(code string, name string, isOnline bool) error {
 		INSERT INTO admin_online_status (volunteer_code, name, is_online, last_seen) 
 		VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
 		ON CONFLICT (volunteer_code) 
-		DO UPDATE SET is_online = $3, last_seen = CURRENT_TIMESTAMP`, 
+		DO UPDATE SET is_online = $3, last_seen = CURRENT_TIMESTAMP`,
 		code, name, isOnline)
 	return err
 }
@@ -330,7 +330,7 @@ func getOnlineAdmins() ([]AdminStatus, error) {
 	}
 	defer rows.Close()
 
-	var admins []AdminStatus
+	admins := []AdminStatus{} // Initialize as empty array instead of nil
 	for rows.Next() {
 		var admin AdminStatus
 		if err := rows.Scan(&admin.VolunteerCode, &admin.Name, &admin.IsOnline, &admin.LastSeen); err != nil {
@@ -348,7 +348,7 @@ func getPendingChatRequests() ([]ChatSession, error) {
 	}
 	defer rows.Close()
 
-	var sessions []ChatSession
+	sessions := []ChatSession{} // Initialize as empty array instead of nil
 	for rows.Next() {
 		var s ChatSession
 		if err := rows.Scan(&s.ID, &s.UserVolunteerCode, &s.UserName, &s.Status, &s.CreatedAt); err != nil {
@@ -363,7 +363,7 @@ func acceptChatRequest(sessionId int, admin User) error {
 	result, err := db.Exec(`
 		UPDATE chat_sessions 
 		SET status = 'connected', admin_volunteer_code = $1, admin_name = $2 
-		WHERE id = $3 AND status = 'waiting'`, 
+		WHERE id = $3 AND status = 'waiting'`,
 		admin.VolunteerCode, admin.Name, sessionId)
 	if err != nil {
 		return err
@@ -386,7 +386,7 @@ func getAdminActiveSessions(adminCode string) ([]ChatSession, error) {
 	}
 	defer rows.Close()
 
-	var sessions []ChatSession
+	sessions := []ChatSession{} // Initialize as empty array instead of nil
 	for rows.Next() {
 		var s ChatSession
 		var adminCode sql.NullString
@@ -394,251 +394,256 @@ func getAdminActiveSessions(adminCode string) ([]ChatSession, error) {
 		if err := rows.Scan(&s.ID, &s.UserVolunteerCode, &s.UserName, &adminCode, &adminName, &s.Status, &s.CreatedAt); err != nil {
 			return nil, err
 		}
-		if adminCode.Valid { s.AdminVolunteerCode = adminCode.String }
-		if adminName.Valid { s.AdminName = adminName.String }
+		if adminCode.Valid {
+			s.AdminVolunteerCode = adminCode.String
+		}
+		if adminName.Valid {
+			s.AdminName = adminName.String
+		}
 		sessions = append(sessions, s)
 	}
 	return sessions, nil
 }
 
-// callGemini function 
+// callGemini function
 func callGemini(contents []map[string]interface{}, instruction string) (string, []map[string]interface{}, error) {
-    model := geminiClient.GenerativeModel("models/gemini-flash-latest")
+	model := geminiClient.GenerativeModel("models/gemini-flash-latest")
 
-    // Konfigurasi tools yang bisa dipanggil AI
-    model.Tools = []*genai.Tool{
-        {
-            FunctionDeclarations: []*genai.FunctionDeclaration{
-                {
-                    Name:        "update_zakat",
-                    Description: "Update an existing zakat record.",
-                    Parameters: &genai.Schema{
-                        Type: genai.TypeObject,
-                        Properties: map[string]*genai.Schema{
-                            "id":            {Type: genai.TypeInteger, Description: "The ID of the zakat record to update."},
-                            "muzakkiName":   {Type: genai.TypeString, Description: "The new name of the muzakki."},
-                            "zakatType":     {Type: genai.TypeString, Description: "The new type of zakat."},
-                            "amount":        {Type: genai.TypeInteger, Description: "The new amount of the zakat."},
-                        },
-                        Required: []string{"id"},
-                    },
-                },
-                // Tambahkan fungsi lain di sini jika perlu (add_zakat, dll)
-                {
-                    Name:        "get_laz_info",
-                    Description: "Get detailed, up-to-date information about a specific LAZ (Lembaga Amil Zakat) from their official website.",
-                    Parameters: &genai.Schema{
-                        Type: genai.TypeObject,
-                        Properties: map[string]*genai.Schema{
-                            "lazName": {Type: genai.TypeString, Description: "The name of the LAZ, e.g., 'Harfa'"},
-                        },
-                        Required: []string{"lazName"},
-                    },
-                },
-            },
-        },
-    }
+	// Konfigurasi tools yang bisa dipanggil AI
+	model.Tools = []*genai.Tool{
+		{
+			FunctionDeclarations: []*genai.FunctionDeclaration{
+				{
+					Name:        "update_zakat",
+					Description: "Update an existing zakat record.",
+					Parameters: &genai.Schema{
+						Type: genai.TypeObject,
+						Properties: map[string]*genai.Schema{
+							"id":          {Type: genai.TypeInteger, Description: "The ID of the zakat record to update."},
+							"muzakkiName": {Type: genai.TypeString, Description: "The new name of the muzakki."},
+							"zakatType":   {Type: genai.TypeString, Description: "The new type of zakat."},
+							"amount":      {Type: genai.TypeInteger, Description: "The new amount of the zakat."},
+						},
+						Required: []string{"id"},
+					},
+				},
+				// Tambahkan fungsi lain di sini jika perlu (add_zakat, dll)
+				{
+					Name:        "get_laz_info",
+					Description: "Get detailed, up-to-date information about a specific LAZ (Lembaga Amil Zakat) from their official website.",
+					Parameters: &genai.Schema{
+						Type: genai.TypeObject,
+						Properties: map[string]*genai.Schema{
+							"lazName": {Type: genai.TypeString, Description: "The name of the LAZ, e.g., 'Harfa'"},
+						},
+						Required: []string{"lazName"},
+					},
+				},
+			},
+		},
+	}
 
-    // Bangun history percakapan
-    history := []*genai.Content{
-        {
-            Parts: []genai.Part{genai.Text(instruction)},
-            Role:  "user",
-        },
-        {
-            Parts: []genai.Part{genai.Text("OK, saya mengerti.")},
-            Role:  "model",
-        },
-    }
-    for _, content := range contents {
-        role := content["role"].(string)
-        parts := content["parts"].([]interface{})
-        var textParts []genai.Part
-        for _, part := range parts {
-            if partMap, ok := part.(map[string]interface{}); ok {
-                if text, ok := partMap["text"].(string); ok {
-                    textParts = append(textParts, genai.Text(text))
-                }
-            }
-        }
-        if len(textParts) > 0 {
-            history = append(history, &genai.Content{
-                Parts: textParts,
-                Role:  role,
-            })
-        }
-    }
+	// Bangun history percakapan
+	history := []*genai.Content{
+		{
+			Parts: []genai.Part{genai.Text(instruction)},
+			Role:  "user",
+		},
+		{
+			Parts: []genai.Part{genai.Text("OK, saya mengerti.")},
+			Role:  "model",
+		},
+	}
+	for _, content := range contents {
+		role := content["role"].(string)
+		parts := content["parts"].([]interface{})
+		var textParts []genai.Part
+		for _, part := range parts {
+			if partMap, ok := part.(map[string]interface{}); ok {
+				if text, ok := partMap["text"].(string); ok {
+					textParts = append(textParts, genai.Text(text))
+				}
+			}
+		}
+		if len(textParts) > 0 {
+			history = append(history, &genai.Content{
+				Parts: textParts,
+				Role:  role,
+			})
+		}
+	}
 
-    session := model.StartChat()
-    session.History = history
-    lastMessage := history[len(history)-1]
-    
-    resp, err := session.SendMessage(ctx, lastMessage.Parts...)
-    if err != nil {
-        return "", nil, err
-    }
+	session := model.StartChat()
+	session.History = history
+	lastMessage := history[len(history)-1]
 
-    if len(resp.Candidates) == 0 {
-        return "No response", nil, nil
-    }
+	resp, err := session.SendMessage(ctx, lastMessage.Parts...)
+	if err != nil {
+		return "", nil, err
+	}
 
-    // Parse respons dari AI untuk mencari function call
-    var functions []map[string]interface{}
-    for _, part := range resp.Candidates[0].Content.Parts {
-        if fc, ok := part.(genai.FunctionCall); ok {
-            args := make(map[string]interface{})
-            for k, v := range fc.Args {
-                args[k] = v
-            }
-            functions = append(functions, map[string]interface{}{
-                "name": fc.Name,
-                "args": args,
-            })
-        }
-    }
+	if len(resp.Candidates) == 0 {
+		return "No response", nil, nil
+	}
 
-    text := ""
-    for _, part := range resp.Candidates[0].Content.Parts {
-        if t, ok := part.(genai.Text); ok {
-            text += string(t)
-        }
-    }
+	// Parse respons dari AI untuk mencari function call
+	var functions []map[string]interface{}
+	for _, part := range resp.Candidates[0].Content.Parts {
+		if fc, ok := part.(genai.FunctionCall); ok {
+			args := make(map[string]interface{})
+			for k, v := range fc.Args {
+				args[k] = v
+			}
+			functions = append(functions, map[string]interface{}{
+				"name": fc.Name,
+				"args": args,
+			})
+		}
+	}
 
-    return text, functions, nil
+	text := ""
+	for _, part := range resp.Candidates[0].Content.Parts {
+		if t, ok := part.(genai.Text); ok {
+			text += string(t)
+		}
+	}
+
+	return text, functions, nil
 }
 
 // Fungsi untuk menganalisis teks dan menjawab pertanyaan
 func synthesizeAnswerFromContext(question, contextText string) (string, error) {
-    model := geminiClient.GenerativeModel("models/gemini-flash-latest")
+	model := geminiClient.GenerativeModel("models/gemini-flash-latest")
 
-    // Buat prompt yang meminta AI untuk menjawab berdasarkan konteks
-    prompt := fmt.Sprintf(
-        "Berdasarkan *hanya* teks yang diberikan di bawah ini, jawablah pertanyaan pengguna. Jika jawabannya tidak ada dalam teks, katakan dengan sopan bahwa informasi tersebut tidak ditemukan dalam sumber yang tersedia. Jawaban harus ringkas dan langsung ke intinya.\n\n---\nPertanyaan: %s\n\n---\nKonteks:\n%s\n---\nJawaban:",
-        question,
-        contextText,
-    )
+	// Buat prompt yang meminta AI untuk menjawab berdasarkan konteks
+	prompt := fmt.Sprintf(
+		"Berdasarkan *hanya* teks yang diberikan di bawah ini, jawablah pertanyaan pengguna. Jika jawabannya tidak ada dalam teks, katakan dengan sopan bahwa informasi tersebut tidak ditemukan dalam sumber yang tersedia. Jawaban harus ringkas dan langsung ke intinya.\n\n---\nPertanyaan: %s\n\n---\nKonteks:\n%s\n---\nJawaban:",
+		question,
+		contextText,
+	)
 
-    resp, err := model.GenerateContent(ctx, genai.Text(prompt))
-    if err != nil {
-        return "", err
-    }
+	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	if err != nil {
+		return "", err
+	}
 
-    if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
-        return "Maaf, saya tidak bisa merangkai jawaban dari informasi yang ada.", nil
-    }
+	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+		return "Maaf, saya tidak bisa merangkai jawaban dari informasi yang ada.", nil
+	}
 
-    return string(resp.Candidates[0].Content.Parts[0].(genai.Text)), nil
+	return string(resp.Candidates[0].Content.Parts[0].(genai.Text)), nil
 }
+
 // chatHandler function
 func chatHandler(w http.ResponseWriter, r *http.Request) {
-    if r.Method != "POST" {
-        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-        return
-    }
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-    var req ChatRequest
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        http.Error(w, err.Error(), http.StatusBadRequest)
-        return
-    }
+	var req ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
-    // Authenticate user if provided (PERBAIKAN: Satu deklarasi yang lengkap)
-    var currentUser *User
-    if req.CurrentUser != nil {
-        currentUser = &User{
-            VolunteerCode: req.CurrentUser["volunteerCode"].(string),
-            Name:          req.CurrentUser["name"].(string),
-            LazName:       req.CurrentUser["lazName"].(string),
-            Role:          req.CurrentUser["role"].(string),
-        }
-    }
+	// Authenticate user if provided (PERBAIKAN: Satu deklarasi yang lengkap)
+	var currentUser *User
+	if req.CurrentUser != nil {
+		currentUser = &User{
+			VolunteerCode: req.CurrentUser["volunteerCode"].(string),
+			Name:          req.CurrentUser["name"].(string),
+			LazName:       req.CurrentUser["lazName"].(string),
+			Role:          req.CurrentUser["role"].(string),
+		}
+	}
 
-    // Call Gemini
-    text, functions, err := callGemini(req.Contents, req.Instruction)
-    if err != nil {
-        log.Printf("Gemini error: %v", err)
-        text = "Error calling AI"
-    }
+	// Call Gemini
+	text, functions, err := callGemini(req.Contents, req.Instruction)
+	if err != nil {
+		log.Printf("Gemini error: %v", err)
+		text = "Error calling AI"
+	}
 
-    // Eksekusi fungsi yang dipanggil oleh AI
-    for _, f := range functions {
-        name := f["name"].(string)
-        args := f["args"].(map[string]interface{})
-        switch name {
-        case "update_zakat":
-            id := int(args["id"].(float64))
-            updates := make(map[string]interface{})
-            if muzakkiName, ok := args["muzakkiName"]; ok {
-                updates["muzakki_name"] = muzakkiName
-            }
-            if zakatType, ok := args["zakatType"]; ok {
-                updates["zakat_type"] = zakatType
-            }
-            if amount, ok := args["amount"]; ok {
-                updates["amount"] = int(amount.(float64))
-            }
-            err := updateZakatRecord(id, updates, currentUser)
-            if err != nil {
-                log.Printf("Error updating zakat: %v", err)
-                text += "\n\nMaaf, terjadi kesalahan saat mengupdate data: " + err.Error()
-            } else {
-                text += "\n\nData berhasil diperbarui di database."
-            }
-// Di dalam fungsi chatHandler, di dalam loop for functions
-case "get_laz_info":
-    requestedLaz := args["lazName"].(string)
+	// Eksekusi fungsi yang dipanggil oleh AI
+	for _, f := range functions {
+		name := f["name"].(string)
+		args := f["args"].(map[string]interface{})
+		switch name {
+		case "update_zakat":
+			id := int(args["id"].(float64))
+			updates := make(map[string]interface{})
+			if muzakkiName, ok := args["muzakkiName"]; ok {
+				updates["muzakki_name"] = muzakkiName
+			}
+			if zakatType, ok := args["zakatType"]; ok {
+				updates["zakat_type"] = zakatType
+			}
+			if amount, ok := args["amount"]; ok {
+				updates["amount"] = int(amount.(float64))
+			}
+			err := updateZakatRecord(id, updates, currentUser)
+			if err != nil {
+				log.Printf("Error updating zakat: %v", err)
+				text += "\n\nMaaf, terjadi kesalahan saat mengupdate data: " + err.Error()
+			} else {
+				text += "\n\nData berhasil diperbarui di database."
+			}
+		// Di dalam fungsi chatHandler, di dalam loop for functions
+		case "get_laz_info":
+			requestedLaz := args["lazName"].(string)
 
-    // --- Otorisasi tetap sama ---
-    if currentUser.Role == "admin" || strings.ToLower(requestedLaz) == strings.ToLower(currentUser.LazName) {
-        
-        // 1. Ambil informasi mentah dari web
-        info, err := getLazInfoFromWeb(requestedLaz)
-        if err != nil {
-            log.Printf("Error getting LAZ info: %v", err)
-            text += fmt.Sprintf("\n\nMaaf, terjadi kesalahan saat mengambil informasi: %s", err.Error())
-        } else {
-            // 2. Cari pertanyaan asli dari user
-            originalQuestion := ""
-            if len(req.Contents) > 0 {
-                lastContent := req.Contents[len(req.Contents)-1]
-                if parts, ok := lastContent["parts"].([]interface{}); ok && len(parts) > 0 {
-                    if textPart, ok := parts[0].(map[string]interface{}); ok {
-                        if q, ok := textPart["text"].(string); ok {
-                            originalQuestion = q
-                        }
-                    }
-                }
-            }
+			// --- Otorisasi tetap sama ---
+			if currentUser.Role == "admin" || strings.ToLower(requestedLaz) == strings.ToLower(currentUser.LazName) {
 
-            // 3. Analisis informasi dan buat jawaban yang ringkas
-            if originalQuestion != "" {
-                synthesizedAnswer, err := synthesizeAnswerFromContext(originalQuestion, info)
-                if err != nil {
-                    log.Printf("Error synthesizing answer: %v", err)
-                    // Jika analisis gagal, tampilkan data mentah sebagai fallback
-                    text += "\n\nSaya telah mengambil informasi, tetapi mengalami kesalahan saat menganalisisnya. Berikut adalah data mentahnya:\n\n" + info
-                } else {
-                    // Tampilkan jawaban yang sudah dianalisis
-                    text += "\n\n" + synthesizedAnswer
-                }
-            } else {
-                // Fallback jika tidak bisa menemukan pertanyaan asli
-                text += "\n\nSaya telah mengambil informasi berikut, tetapi tidak bisa menganalisisnya lebih lanjut:\n\n" + info
-            }
-        }
-    } else {
-        log.Printf("User %s (from %s) tried to access info for %s", currentUser.VolunteerCode, currentUser.LazName, requestedLaz)
-        text += fmt.Sprintf("\n\nMaaf, Anda hanya diizinkan untuk mengakses informasi LAZ %s.", currentUser.LazName)
-    }
-        }
-    }
+				// 1. Ambil informasi mentah dari web
+				info, err := getLazInfoFromWeb(requestedLaz)
+				if err != nil {
+					log.Printf("Error getting LAZ info: %v", err)
+					text += fmt.Sprintf("\n\nMaaf, terjadi kesalahan saat mengambil informasi: %s", err.Error())
+				} else {
+					// 2. Cari pertanyaan asli dari user
+					originalQuestion := ""
+					if len(req.Contents) > 0 {
+						lastContent := req.Contents[len(req.Contents)-1]
+						if parts, ok := lastContent["parts"].([]interface{}); ok && len(parts) > 0 {
+							if textPart, ok := parts[0].(map[string]interface{}); ok {
+								if q, ok := textPart["text"].(string); ok {
+									originalQuestion = q
+								}
+							}
+						}
+					}
 
-    response := ChatResponse{
-        Text: text,
-    }
+					// 3. Analisis informasi dan buat jawaban yang ringkas
+					if originalQuestion != "" {
+						synthesizedAnswer, err := synthesizeAnswerFromContext(originalQuestion, info)
+						if err != nil {
+							log.Printf("Error synthesizing answer: %v", err)
+							// Jika analisis gagal, tampilkan data mentah sebagai fallback
+							text += "\n\nSaya telah mengambil informasi, tetapi mengalami kesalahan saat menganalisisnya. Berikut adalah data mentahnya:\n\n" + info
+						} else {
+							// Tampilkan jawaban yang sudah dianalisis
+							text += "\n\n" + synthesizedAnswer
+						}
+					} else {
+						// Fallback jika tidak bisa menemukan pertanyaan asli
+						text += "\n\nSaya telah mengambil informasi berikut, tetapi tidak bisa menganalisisnya lebih lanjut:\n\n" + info
+					}
+				}
+			} else {
+				log.Printf("User %s (from %s) tried to access info for %s", currentUser.VolunteerCode, currentUser.LazName, requestedLaz)
+				text += fmt.Sprintf("\n\nMaaf, Anda hanya diizinkan untuk mengakses informasi LAZ %s.", currentUser.LazName)
+			}
+		}
+	}
 
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(response)
+	response := ChatResponse{
+		Text: text,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
@@ -823,20 +828,20 @@ func zakatHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func initDB() {
-    // Use the environment variable, just like before
-    dbURL := os.Getenv("DATABASE_URL")
-    if dbURL == "" {
-        log.Fatal("DATABASE_URL not set")
-    }
-    var err error
-    db, err = sql.Open("postgres", dbURL)
-    if err != nil {
-        log.Fatalf("Failed to open DB: %v", err)
-    }
-    if err = db.Ping(); err != nil {
-        log.Fatalf("Failed to ping DB: %v", err)
-    }
-    log.Println("Database connected successfully.")
+	// Use the environment variable, just like before
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("DATABASE_URL not set")
+	}
+	var err error
+	db, err = sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("Failed to open DB: %v", err)
+	}
+	if err = db.Ping(); err != nil {
+		log.Fatalf("Failed to ping DB: %v", err)
+	}
+	log.Println("Database connected successfully.")
 }
 
 func seedDB() {
@@ -850,6 +855,8 @@ func seedDB() {
 		_, err := db.Exec("INSERT INTO users (volunteer_code, password, name, laz_name, description, role) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (volunteer_code) DO NOTHING", u.VolunteerCode, u.Password, u.Name, u.LazName, u.Description, u.Role)
 		if err != nil {
 			log.Printf("Error seeding user %s: %v", u.VolunteerCode, err)
+		} else {
+			log.Printf("✓ User %s seeded successfully", u.VolunteerCode)
 		}
 	}
 
@@ -869,60 +876,61 @@ func seedDB() {
 }
 
 func initGemini() {
-    // Use the correct environment variable name
-    apiKey := os.Getenv("GEMINI_API_KEY")
-    if apiKey == "" {
-        log.Fatal("GEMINI_API_KEY environment variable not set.")
-    }
-    var err error
-    geminiClient, err = genai.NewClient(ctx, option.WithAPIKey(apiKey))
-    if err != nil {
-        log.Fatalf("Failed to create Gemini client: %v", err)
-    }
-    log.Println("GenAI client initialized.")
+	// Use the correct environment variable name
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		log.Fatal("GEMINI_API_KEY environment variable not set.")
+	}
+	var err error
+	geminiClient, err = genai.NewClient(ctx, option.WithAPIKey(apiKey))
+	if err != nil {
+		log.Fatalf("Failed to create Gemini client: %v", err)
+	}
+	log.Println("GenAI client initialized.")
 }
+
 // Multi LAZ Handler
 // Ganti fungsi getHarfaInfo yang lama dengan ini
 func getLazInfoFromWeb(lazName string) (string, error) {
-    var url string
-    // Normalisasi nama LAZ ke huruf kecil untuk pencocokan
-    normalizedLazName := strings.ToLower(lazName)
+	var url string
+	// Normalisasi nama LAZ ke huruf kecil untuk pencocokan
+	normalizedLazName := strings.ToLower(lazName)
 
-    switch normalizedLazName {
-    case "harfa":
-        url = "https://lazharfa.org"
-    case "izi":
-        url = "https://izi.or.id"
-    case "rz":
-        url = "https://www.rumahzakat.org"
-    case "yakesma":
-        url = "https://www.yakesma.org"
-    case "baznas":
-        url = "https://www.baznas.go.id"
-    default:
-        return "", fmt.Errorf("saya belum memiliki sumber informasi untuk LAZ '%s'", lazName)
-    }
+	switch normalizedLazName {
+	case "harfa":
+		url = "https://lazharfa.org"
+	case "izi":
+		url = "https://izi.or.id"
+	case "rz":
+		url = "https://www.rumahzakat.org"
+	case "yakesma":
+		url = "https://www.yakesma.org"
+	case "baznas":
+		url = "https://www.baznas.go.id"
+	default:
+		return "", fmt.Errorf("saya belum memiliki sumber informasi untuk LAZ '%s'", lazName)
+	}
 
-    res, err := http.Get(url)
-    if err != nil {
-        return "", fmt.Errorf("gagal mengakses website %s: %v", url, err)
-    }
-    defer res.Body.Close()
+	res, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("gagal mengakses website %s: %v", url, err)
+	}
+	defer res.Body.Close()
 
-    doc, err := goquery.NewDocumentFromReader(res.Body)
-    if err != nil {
-        return "", fmt.Errorf("gagal mem-parsing website %s: %v", url, err)
-    }
+	doc, err := goquery.NewDocumentFromReader(res.Body)
+	if err != nil {
+		return "", fmt.Errorf("gagal mem-parsing website %s: %v", url, err)
+	}
 
-    var content strings.Builder
-    doc.Find("p, h1, h2, h3, h4, li").Each(func(i int, s *goquery.Selection) {
-        text := strings.TrimSpace(s.Text())
-        if text != "" {
-            content.WriteString(text + "\n")
-        }
-    })
+	var content strings.Builder
+	doc.Find("p, h1, h2, h3, h4, li").Each(func(i int, s *goquery.Selection) {
+		text := strings.TrimSpace(s.Text())
+		if text != "" {
+			content.WriteString(text + "\n")
+		}
+	})
 
-    return content.String(), nil
+	return content.String(), nil
 }
 
 func lazInfoHandler(w http.ResponseWriter, r *http.Request) {
@@ -1190,31 +1198,49 @@ func chatAdminActiveHandler(w http.ResponseWriter, r *http.Request) {
 
 // corsMiddleware menambahkan header CORS ke SEMUA response API
 func corsMiddleware(next http.Handler) http.Handler {
-    // Set a safe fallback to your production domain
-    allowedOrigin := os.Getenv("ALLOWED_ORIGIN")
-    if allowedOrigin == "" {
-        allowedOrigin = "https://zapa.centonk.my.id"
-    }
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
 
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        origin := r.Header.Get("Origin")
+		// Allow development origins and production origin
+		allowedOrigins := []string{
+			"http://localhost:3000",
+			"http://localhost:3001",
+			"http://localhost:5173",
+			"https://zapa.centonk.my.id",
+		}
 
-        if origin == allowedOrigin {
-            w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-            w.Header().Set("Vary", "Origin")
-        }
+		// Check if origin is in allowed list
+		isAllowed := false
+		for _, allowed := range allowedOrigins {
+			if origin == allowed {
+				isAllowed = true
+				break
+			}
+		}
 
-        w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-        w.Header().Set("Access-Control-Allow-Credentials", "true")
+		// Also check environment variable for custom origin
+		customOrigin := os.Getenv("ALLOWED_ORIGIN")
+		if customOrigin != "" && origin == customOrigin {
+			isAllowed = true
+		}
 
-        if r.Method == http.MethodOptions {
-            w.WriteHeader(http.StatusNoContent)
-            return
-        }
+		// Set CORS headers ALWAYS for allowed origins (Firefox needs this)
+		if isAllowed && origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Vary", "Origin")
+		}
 
-        next.ServeHTTP(w, r)
-    })
+		// Handle preflight requests (Firefox always sends these)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func main() {
@@ -1225,6 +1251,7 @@ func main() {
 	}
 	initDB()
 	initGemini()
+	seedDB() // Seed database with initial data
 	defer db.Close()
 	defer geminiClient.Close()
 

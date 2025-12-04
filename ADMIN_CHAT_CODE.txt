@@ -1,0 +1,55 @@
+// ============================================
+// KODE UNTUK DITAMBAHKAN KE src/App.tsx
+// ============================================
+
+// STEP 1: Tambahkan useEffect untuk polling (cari baris dengan "const handleLoginSuccess" dan tambahkan SEBELUMNYA)
+// ============================================
+  // Poll for pending chat requests (Admin only)
+  useEffect(() => {
+    if (currentUser?.role !== 'admin' || chatMode !== 'bot') return;
+
+    const pollRequests = async () => {
+      try {
+        const requests = await getPendingChatRequests(currentUser);
+        setPendingRequests(requests);
+      } catch (err) {
+        console.error('Error polling chat requests:', err);
+      }
+    };
+
+    // Poll immediately
+    pollRequests();
+
+    // Then poll every 3 seconds
+    const interval = setInterval(pollRequests, 3000);
+
+    return () => clearInterval(interval);
+  }, [currentUser, chatMode]);
+
+// STEP 2: Tambahkan handleAcceptChat (cari "const handleLogout" dan tambahkan SEBELUMNYA)
+// ============================================
+  const handleAcceptChat = async (sessionId: number) => {
+    setIsAcceptingChat(true);
+    try {
+      const session = await acceptChatRequest(sessionId, currentUser!);
+      setLiveChatSession(session);
+      setChatMode('admin');
+      setPendingRequests(prev => prev.filter(req => req.id !== sessionId));
+    } catch (error) {
+      console.error('Error accepting chat:', error);
+      alert('Gagal menerima chat. Silakan coba lagi.');
+    } finally {
+      setIsAcceptingChat(false);
+    }
+  };
+
+// STEP 3: Tambahkan render component (cari tombol "Hubungi Admin" dan tambahkan SETELAHNYA, sebelum closing LiveChatPanel)
+// ============================================
+          {/* Admin Chat Notification (Feature-Flagged) */}
+          {FEATURES.LIVE_CHAT_ENABLED && currentUser?.role === 'admin' && chatMode === 'bot' && (
+            <AdminChatNotification
+              pendingRequests={pendingRequests}
+              onAccept={handleAcceptChat}
+              isProcessing={isAcceptingChat}
+            />
+          )}

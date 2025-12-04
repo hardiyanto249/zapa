@@ -1,5 +1,6 @@
 
 import React, { useState } from 'react';
+import { authenticateUser } from '../services/databaseService';
 import type { User } from '../types';
 
 interface LoginProps {
@@ -12,7 +13,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!volunteerCode || !password) {
       setError('Kode Relawan dan Password tidak boleh kosong.');
@@ -20,27 +21,17 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     }
     setIsLoading(true);
     setError(null);
-
-    try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8081';
-      const response = await fetch(`${apiUrl}/api/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ volunteerCode, password }),
-      });
-      if (response.ok) {
-        const user: User = await response.json();
-        onLoginSuccess(user);
-      } else {
-        setError('Kode Relawan atau Password salah.');
-      }
-    } catch (err) {
-      setError('Gagal terhubung ke server.');
-    } finally {
-      setIsLoading(false);
-    }
+    
+    // Simulate network delay
+    setTimeout(() => {
+        const user = authenticateUser(volunteerCode, password);
+        if (user) {
+            onLoginSuccess(user);
+        } else {
+            setError('Kode Relawan atau Password salah.');
+        }
+        setIsLoading(false);
+    }, 500);
   };
 
   return (
