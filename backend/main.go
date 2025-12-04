@@ -1126,7 +1126,7 @@ func adminOnlineHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"admins": admins})
+	json.NewEncoder(w).Encode(admins)
 }
 
 func chatPendingHandler(w http.ResponseWriter, r *http.Request) {

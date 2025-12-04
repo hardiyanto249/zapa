@@ -145,6 +145,10 @@ export const getOnlineAdmins = async (): Promise<AdminStatus[]> => {
     }
 
     const data = await response.json();
+    // Handle both array (new format) and object wrapper (old format)
+    if (Array.isArray(data)) {
+        return data;
+    }
     return data.admins || [];
 };
 
