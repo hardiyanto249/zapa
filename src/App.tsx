@@ -18,6 +18,7 @@ import {
 import { LiveChatPanel } from './components/LiveChatPanel';
 import { AdminChatNotification } from './components/AdminChatNotification';
 import { requestLiveChatSession, getOnlineAdmins, getPendingChatRequests, acceptChatRequest } from './services/liveChatService';
+import { VolunteerImport } from './components/VolunteerImport';
 
 const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -31,6 +32,7 @@ const App: React.FC = () => {
   const [liveChatSession, setLiveChatSession] = useState<ChatSession | null>(null);
   const [pendingRequests, setPendingRequests] = useState<ChatSession[]>([]);
   const [isAcceptingChat, setIsAcceptingChat] = useState(false);
+  const [showImportModal, setShowImportModal] = useState<boolean>(false);
 
   const addBotMessage = (text: string, isComponent: boolean = false) => {
     setMessages(prev => [...prev, {
@@ -516,8 +518,16 @@ Apakah data sudah benar dan ingin dilanjutkan? (ya/tidak)`;
           setIsLoading(false);
           return;
         } else if (functionCall.name === 'update_zakat') {
-          if (functionCall.args?.id) {
-            addBotMessage(`Anda akan mengupdate data Id. ${functionCall.args.id}`);
+          const args = functionCall.args || {};
+          const hasUpdateFields = Object.keys(args).some(k => k !== 'id');
+
+          if (args.id && hasUpdateFields) {
+            // Execute immediately if we have data (from Modal)
+            const result = await executeFunctionCall(functionCall, currentUser);
+            let botMessageText = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+            addBotMessage(botMessageText);
+          } else if (args.id) {
+            addBotMessage(`Anda akan mengupdate data Id. ${args.id}`);
             setConversationContext({
               active_intent: 'CONFIRM_UPDATE',
               collected_data: {},
@@ -559,15 +569,15 @@ Apakah data sudah benar dan ingin dilanjutkan? (ya/tidak)`;
     }
   }, [startZakatCollection, startUserCollection, currentUser, conversationContext]);
 
-  const handleFileUpload = (file: File) => {
+  const handleFileUpload = async (file: File) => {
     if (!file || (conversationContext.active_intent !== 'ADD_ZAKAT' && conversationContext.active_intent !== 'CONFIRM_BATCH') || conversationContext.next_question_key !== 'proofOfTransfer') return;
 
     setIsLoading(true);
     setError(null);
 
-    const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3 MB
+    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
     if (file.size > MAX_FILE_SIZE) {
-      addBotMessage("Ukuran file terlalu besar (maks. 3MB). Silakan pilih file lain.");
+      addBotMessage("Ukuran file terlalu besar (maks. 10MB). Silakan pilih file lain.");
       setIsLoading(false);
       return;
     }
@@ -575,15 +585,45 @@ Apakah data sudah benar dan ingin dilanjutkan? (ya/tidak)`;
     const userMessage: Message = { id: Date.now().toString(), sender: 'user', text: `[File diunggah: ${file.name}]`, isComponent: false };
     setMessages(prev => [...prev, userMessage]);
 
-    addBotMessage(`File '${file.name}' berhasil diterima. Perlu diketahui, file tidak diunggah ke server, hanya namanya yang dicatat.`);
+    // Upload to server
+    const formData = new FormData();
+    formData.append('file', file);
 
-    const updatedEntries = conversationContext.zakat_entries.map(entry => ({
-      ...entry,
-      proofOfTransfer: file.name
-    }));
+    try {
+      // Assume API is at same origin /api/upload if proxied or backend url
+      // In local dev, might need env var. Assuming proxy in vite/nginx handles it.
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`, // Assuming token logic exists or using defaults
+          // 'Content-Type': 'multipart/form-data' // Fetch sets this automatically
+        },
+        body: formData
+      });
 
-    setConversationContext(prev => ({ ...prev, zakat_entries: updatedEntries, requires_file_upload: false, next_question_key: null }));
-    finalizeZakatBatch(updatedEntries);
+      if (!response.ok) {
+        throw new Error(`Upload failed: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const uploadedFilename = data.filename;
+
+      addBotMessage(`File '${file.name}' berhasil diunggah.`);
+
+      const updatedEntries = conversationContext.zakat_entries.map(entry => ({
+        ...entry,
+        proofOfTransfer: uploadedFilename
+      }));
+
+      setConversationContext(prev => ({ ...prev, zakat_entries: updatedEntries, requires_file_upload: false, next_question_key: null }));
+      finalizeZakatBatch(updatedEntries);
+
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      addBotMessage(`Gagal mengunggah file: ${msg}`);
+      setIsLoading(false);
+      // Do not proceed to finalize if upload failed
+    }
   };
 
   const handleSendMessage = useCallback(async (text: string) => {
@@ -593,6 +633,93 @@ Apakah data sudah benar dan ingin dilanjutkan? (ya/tidak)`;
     setMessages(prev => [...prev, userMessage]);
     setIsLoading(true);
     setError(null);
+
+    // --- Manual Command Parsing to bypass AI for sensitive/strict ops ---
+    const lowerText = text.toLowerCase();
+
+    // CASE 1: DELETE ZAKAT
+    // Format: "delete_zakat id:123"
+    if (lowerText.startsWith("delete_zakat id:")) {
+      try {
+        const idPart = text.split("id:")[1].trim();
+        const id = parseInt(idPart);
+        if (!isNaN(id)) {
+          // Confirm dialog call
+          addBotMessage(`Anda akan menghapus data Id. ${id} (y/n)`);
+          setConversationContext({
+            active_intent: 'CONFIRM_DELETE',
+            collected_data: {},
+            zakat_entries: [],
+            next_question_key: null,
+            pending_function_call: { name: 'delete_zakat', args: { id: id } },
+            requires_file_upload: false,
+          });
+          setIsLoading(false);
+          return;
+        }
+      } catch (e) {
+        console.error("Parse error", e);
+      }
+    }
+
+    // CASE 2: UPDATE ZAKAT
+    // Format: "update_zakat id:123, field:val, ..."
+    if (lowerText.startsWith("update_zakat id:")) {
+      try {
+        // Parse args "id:123, muzakkiName:foo, ..."
+        // Regex or split
+        const args: any = {};
+        const parts = text.split(',').map(p => p.trim());
+        for (const part of parts) {
+          // Handle "key: value"
+          // The first part "update_zakat id:..." is special
+          let keyStr = part;
+          if (part.toLowerCase().startsWith("update_zakat ")) {
+            keyStr = part.substring("update_zakat ".length).trim();
+          }
+
+          const sepIndex = keyStr.indexOf(':');
+          if (sepIndex !== -1) {
+            const k = keyStr.substring(0, sepIndex).trim();
+            let v = keyStr.substring(sepIndex + 1).trim();
+
+            if (k === 'id' || k === 'amount') {
+              args[k] = parseInt(v);
+            } else {
+              args[k] = v;
+            }
+          }
+        }
+
+        if (args.id) {
+          // Check if it's just ID (requesting dialog) or full update (from modal)
+          const hasOtherFields = Object.keys(args).length > 1;
+          if (hasOtherFields) {
+            // Execute immediately
+            const result = await executeFunctionCall({ name: 'update_zakat', args: args }, currentUser);
+            let botMessageText = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+            addBotMessage(botMessageText);
+            setIsLoading(false);
+            return;
+          } else {
+            // Request dialog (legacy chat flow)
+            addBotMessage(`Anda akan mengupdate data Id. ${args.id}`);
+            setConversationContext({
+              active_intent: 'CONFIRM_UPDATE',
+              collected_data: {},
+              zakat_entries: [],
+              next_question_key: null,
+              pending_function_call: { name: 'update_zakat', args: args },
+              requires_file_upload: false,
+            });
+            setIsLoading(false);
+            return;
+          }
+        }
+      } catch (e) {
+        console.error("Parse error", e);
+      }
+    }
 
     switch (conversationContext.active_intent) {
       case 'ADD_ZAKAT':
@@ -742,18 +869,28 @@ Apakah data sudah benar dan ingin dilanjutkan? (ya/tidak)`;
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-900 text-white">
-      <header className="bg-gray-800 p-4 shadow-md flex justify-between items-center">
+    <div className="flex flex-col h-screen bg-gray-900 text-white relative">
+      <header className="bg-gray-800 p-4 shadow-md flex justify-between items-center z-10">
         <div>
           <h1 className="text-2xl font-bold text-cyan-400">ZAPA - Zakat Personal Assistant</h1>
           <p className="text-left text-sm text-gray-400">Login sebagai: {currentUser.name} ({currentUser.role})</p>
         </div>
-        <button
-          onClick={handleLogout}
-          className="px-4 py-2 bg-red-600 rounded-lg font-semibold hover:bg-red-700 transition-colors"
-        >
-          Logout
-        </button>
+        <div className="flex gap-4">
+          {currentUser.role === 'admin' && (
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="px-4 py-2 bg-green-600 rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center gap-2"
+            >
+              <span>📁</span> Import Relawan
+            </button>
+          )}
+          <button
+            onClick={handleLogout}
+            className="px-4 py-2 bg-red-600 rounded-lg font-semibold hover:bg-red-700 transition-colors"
+          >
+            Logout
+          </button>
+        </div>
       </header>
 
       {/* Mode Switcher: AI Chat or Live Chat */}
@@ -788,6 +925,21 @@ Apakah data sudah benar dan ingin dilanjutkan? (ya/tidak)`;
               onAccept={handleAcceptChat}
               isProcessing={isAcceptingChat}
             />
+          )}
+
+          {/* Admin Import Modal */}
+          {showImportModal && (
+            <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-[100] p-4">
+              <div className="w-full max-w-2xl relative">
+                <button
+                  onClick={() => setShowImportModal(false)}
+                  className="absolute -top-10 right-0 text-white hover:text-gray-300 text-xl font-bold"
+                >
+                  Tutup [X]
+                </button>
+                <VolunteerImport currentUser={currentUser} onSuccess={() => { alert('Import selesai!'); setShowImportModal(false); }} />
+              </div>
+            </div>
           )}
         </>
       ) : (

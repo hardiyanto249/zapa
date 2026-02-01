@@ -6,7 +6,17 @@ export interface Message {
   isComponent?: boolean;
 }
 
-export type ZakatType = "Fitrah" | "Fidyah" | "Maal" | "Infak/Sedekah" | "Wakaf" | "Palestina" | "Dunia Islam";
+export type ZakatType =
+  | "Fitrah"
+  | "Fidyah"
+  | "Maal"
+  | "Infaq / Sedekah"
+  | "Program Terikat Umum"
+  | "Program Terikat Daerah"
+  | "Wakaf"
+  | "Palestina"
+  | "Palestina via Benwil"
+  | "Bencana Sumatera";
 
 export interface Zakat {
   id: number;
@@ -15,6 +25,8 @@ export interface Zakat {
   zakatType: ZakatType;
   amount: number;
   proofOfTransfer?: string;
+  description?: string; // Keterangan
+  reconciled?: string;
   createdAt: string;
   confirmUpload?: string;
 }

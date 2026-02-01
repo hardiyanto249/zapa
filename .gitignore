@@ -22,3 +22,44 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+.env
+
+# Backup files
+*.save
+*.bak.*
+backend/app.bak.*
+
+# --- Go (Golang) Specific ---
+# File binari hasil compile (seperti bot dan zapa-telegram-bot)
+backend/telegram/bot
+backend/telegram/zapa-telegram-bot
+backend/telegram/telegram-bot
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+
+# --- Temporary/Editor Files ---
+# File backup dari editor nano (seperti main.go.save)
+*.save
+*.swp
+*~
+.DS_Store
+
+# --- Node.js / Next.js (Jika ada di root yang sama) ---
+node_modules/
+.next/
+out/
+build/
+
+# Binaries
+backend/app
+backend/telegram/bot
+backend/telegram/zapa-telegram-bot
+
+# Environment files
+.env
+.env.production
+backend/.env

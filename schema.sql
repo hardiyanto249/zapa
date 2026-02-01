@@ -18,9 +18,12 @@ CREATE TABLE zakat (
     id SERIAL PRIMARY KEY,
     volunteer_code VARCHAR(50) REFERENCES users(volunteer_code),
     muzakki_name VARCHAR(255) NOT NULL,
-    zakat_type VARCHAR(50) NOT NULL,
-    amount INTEGER NOT NULL,
+    zakat_type VARCHAR(255) NOT NULL,
+    amount TEXT NOT NULL,
     proof_of_transfer VARCHAR(255) NOT NULL,
+    description VARCHAR(255),
+    reconciled VARCHAR(20) DEFAULT 'belum',
+    slip_kwitansi VARCHAR(20) DEFAULT 'tidak',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

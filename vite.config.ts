@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     server: {
-      port: 3001,
+      port: 3006,
       host: '0.0.0.0',
       proxy: {
         '/api': {
