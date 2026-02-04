@@ -141,7 +141,11 @@ func (z *ZapaBot) handleZakatMuzakkiName(chatID int64, name string, session *Use
 	// Create inline keyboard for zakat types
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, zt := range ZakatTypes {
-		btn := tgbotapi.NewInlineKeyboardButtonData(zt, "zakat_type:"+zt)
+		label := zt
+		if zt == "Palestina via Benwil" {
+			label = "Palestina via Bimbel"
+		}
+		btn := tgbotapi.NewInlineKeyboardButtonData(label, "zakat_type:"+zt)
 		rows = append(rows, []tgbotapi.InlineKeyboardButton{btn})
 	}
 	
@@ -153,14 +157,24 @@ func (z *ZapaBot) handleZakatType(chatID int64, text string, session *UserSessio
 	// Check if the typed text is a valid zakat type
 	valid := false
 	for _, t := range ZakatTypes {
-		if strings.EqualFold(t, text) {
+		// Check for exact match or alias
+		isMatch := strings.EqualFold(t, text)
+		if !isMatch && t == "Palestina via Benwil" && strings.EqualFold(text, "Palestina via Bimbel") {
+			isMatch = true
+		}
+
+		if isMatch {
 			entry := session.StateData["current_entry"].(ZakatEntry)
 			entry.ZakatType = t
 			session.StateData["current_entry"] = entry
 	
 			session.State = StateZakatAmount
 			
-			z.sendMessage(chatID, fmt.Sprintf("📋 Jenis Zakat: *%s*\n\nMasukkan *Jumlah* (dalam Rupiah, angka saja):", t))
+			displayType := t
+			if t == "Palestina via Benwil" {
+				displayType = "Palestina via Bimbel"
+			}
+			z.sendMessage(chatID, fmt.Sprintf("📋 Jenis Zakat: *%s*\n\nMasukkan *Jumlah* (dalam Rupiah, angka saja):", displayType))
 			valid = true
 			break
 		}
@@ -183,7 +197,11 @@ func (z *ZapaBot) handleZakatTypeCallback(chatID int64, query *tgbotapi.Callback
 	session.State = StateZakatAmount
 	
 	// Edit message to show selection
-	z.editMessage(chatID, query.Message.MessageID, fmt.Sprintf("📋 Jenis Zakat: *%s*\n\nMasukkan *Jumlah* (dalam Rupiah, angka saja):", zakatType))
+	displayType := zakatType
+	if zakatType == "Palestina via Benwil" {
+		displayType = "Palestina via Bimbel"
+	}
+	z.editMessage(chatID, query.Message.MessageID, fmt.Sprintf("📋 Jenis Zakat: *%s*\n\nMasukkan *Jumlah* (dalam Rupiah, angka saja):", displayType))
 }
 
 func (z *ZapaBot) handleZakatNotes(chatID int64, text string, session *UserSession) {
@@ -313,6 +331,11 @@ func (z *ZapaBot) showEntryConfirmation(chatID int64, session *UserSession) {
 	slipStr := entry.SlipKwitansi
 	if slipStr == "" { slipStr = "tidak" }
 
+	displayType := entry.ZakatType
+	if displayType == "Palestina via Benwil" {
+		displayType = "Palestina via Bimbel"
+	}
+
 	text := fmt.Sprintf(`💰 *Konfirmasi Entry*
 
 Muzakki: *%s*
@@ -323,7 +346,7 @@ Jumlah: *Rp %s*
 
 📊 *Total sementara: Rp %s (%d entries)*
 
-Pilih opsi:`, entry.MuzakkiName, entry.ZakatType, noteStr, slipStr, formatRupiah(entry.Amount), formatRupiah(total), len(entries)+1)
+Pilih opsi:`, entry.MuzakkiName, displayType, noteStr, slipStr, formatRupiah(entry.Amount), formatRupiah(total), len(entries)+1)
 	
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		[]tgbotapi.InlineKeyboardButton{
@@ -415,7 +438,11 @@ func (z *ZapaBot) showBatchSummary(chatID int64, session *UserSession) {
 	for i, e := range entries {
 		noteInfo := ""
 		if e.Notes != "" { noteInfo = fmt.Sprintf(" (%s)", e.Notes) }
-		text.WriteString(fmt.Sprintf("*%d.* %s - %s%s: Rp %s\n", i+1, e.MuzakkiName, e.ZakatType, noteInfo, formatRupiah(e.Amount)))
+		displayType := e.ZakatType
+		if displayType == "Palestina via Benwil" {
+			displayType = "Palestina via Bimbel"
+		}
+		text.WriteString(fmt.Sprintf("*%d.* %s - %s%s: Rp %s\n", i+1, e.MuzakkiName, displayType, noteInfo, formatRupiah(e.Amount)))
 		total += e.Amount
 	}
 	
@@ -650,11 +677,33 @@ func (z *ZapaBot) handleCallback(query *tgbotapi.CallbackQuery) {
 		z.startChangePassword(chatID, session)
 	case "delete_confirm":
 		z.handleDeleteZakatConfirm(chatID, value, session)
+	case "ai_confirm":
+		z.handleAIConfirmCallback(chatID, value, session)
 	// Add more handlers...
 	}
 	
 	// Answer callback to remove loading state
 	z.bot.Request(tgbotapi.NewCallback(query.ID, ""))
+}
+
+func (z *ZapaBot) handleAIConfirmCallback(chatID int64, value string, session *UserSession) {
+	if value == "yes" {
+		// Proceed to Slip Kwitansi check or directly to confirmation or upload
+		// Let's ask for Slip Kwitansi first to match standard flow but maybe skip if we want it fast?
+		// User request is simple. Let's redirect to Slip check which leads to confirmation.
+		// Actually, standard flow is: Muzakki -> Type -> Amount -> Notes -> Slip -> Confirm
+		// We have all up to Notes.
+		// So next is Slip.
+		
+		session.State = StateZakatSlipKwitansi
+		z.askZakatSlipKwitansi(chatID, session)
+		
+	} else {
+		// Wrong data
+		z.sendMessage(chatID, "❌ Baik, dibatalkan. Silakan gunakan /tambahzakat untuk input manual.")
+		session.State = StateIdle
+		session.StateData = make(map[string]interface{})
+	}
 }
 
 func (z *ZapaBot) handleZakatActionCallback(chatID int64, action string, session *UserSession) {
@@ -756,7 +805,12 @@ func (z *ZapaBot) handleAIChat(chatID int64, text string, session *UserSession) 
 	if !exists || usage.Date != today {
 		usage = &DailyUsage{Date: today, Count: 0}
 		z.aiDailyUsage[chatID] = usage
-	}
+	} else {
+        // Force reset count to 0 for debugging/fixing session state if needed, or rely on date change.
+        // Actually, user says it fails. If they hit limit, maybe we should just bump config limit AND reset their counter manually or via restart.
+        // Restarting service clears memory, so `aiDailyUsage` map is empty on restart!
+        // So simple service restart ALREADY resets the count.
+    }
 	
 	if usage.Count >= z.config.MaxDailyAIQuestions {
 		z.usageMu.Unlock()
@@ -1048,7 +1102,8 @@ func (z *ZapaBot) handleDeleteZakatConfirm(chatID int64, value string, session *
 
 func (z *ZapaBot) getLazContext(lazName string) string {
 	// Normalize checks, focusing on Harfa for now as requested
-	if strings.Contains(strings.ToLower(lazName), "harfa") {
+	laz := strings.ToLower(lazName)
+	if strings.Contains(laz, "harfa") || strings.Contains(laz, "harapan dhuafa") {
 		return z.readInfoFiles("harfa")
 	}
 	return ""

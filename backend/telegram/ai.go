@@ -3,16 +3,19 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
+	"log"
 
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/option"
 )
 
 type AIClient struct {
-	client *genai.Client
-	model  *genai.GenerativeModel
-	ctx    context.Context
+	client          *genai.Client
+	model           *genai.GenerativeModel
+	extractionModel *genai.GenerativeModel
+	ctx             context.Context
 }
 
 // System instruction untuk AI - sesuai dengan yang ada di aplikasi
@@ -53,17 +56,25 @@ func NewAIClient(apiKey string) (*AIClient, error) {
 		return nil, err
 	}
 
-	model := client.GenerativeModel("gemini-2.0-flash")
+	// Primary model for Conversation (Question Answering) - Gemini 2.5 Flash
+	model := client.GenerativeModel("gemini-2.5-flash")
 	model.SystemInstruction = &genai.Content{
 		Parts: []genai.Part{genai.Text(ZakatSystemInstruction)},
 	}
 
+	// Secondary model for Extraction (Robustness) - Gemini 1.5 Flash
+	extractionModel := client.GenerativeModel("gemini-pro")
+	// No system instruction needed here as it's included in the prompt
+	
 	return &AIClient{
-		client: client,
-		model:  model,
-		ctx:    ctx,
+		client:          client,
+		model:           model,
+		extractionModel: extractionModel,
+		ctx:             ctx,
 	}, nil
+
 }
+
 
 func (ai *AIClient) Close() {
 	ai.client.Close()
@@ -118,12 +129,26 @@ func (ai *AIClient) AskQuestion(question string, history []AIMessage, contextInf
 		return "", err
 	}
 
+	if len(resp.Candidates) == 0 {
+		if resp.PromptFeedback != nil && resp.PromptFeedback.BlockReason != 0 {
+			log.Printf("AI Blocked: %v", resp.PromptFeedback)
+			return "Maaf, jawaban untuk pertanyaan ini diblokir oleh filter keamanan.", nil
+		}
+		log.Printf("AI returned no candidates. Full response: %+v", resp)
+		return "Maaf, saya tidak menemukan jawaban.", nil
+	}
+
 	// Extract text response
 	var result strings.Builder
 	for _, part := range resp.Candidates[0].Content.Parts {
 		if text, ok := part.(genai.Text); ok {
 			result.WriteString(string(text))
 		}
+	}
+	
+	if result.Len() == 0 {
+		log.Printf("AI candidate content is empty. Parts: %+v", resp.Candidates[0].Content.Parts)
+		return "Maaf, saya tidak dapat menghasilkan teks jawaban.", nil
 	}
 
 	return result.String(), nil
@@ -144,4 +169,67 @@ func (ai *AIClient) QuickAsk(question string) (string, error) {
 	}
 
 	return result.String(), nil
+}
+
+// Extraction System Instruction
+const ZakatExtractionInstruction = `Anda adalah asisten ekstraksi data untuk aplikasi Zakat. Tugas anda adalah mengubah input teks natural dari relawan menjadi format JSON terstruktur.
+
+Konfigurasi:
+- Mata Uang: IDR (Rupiah). Konversi "50rb" jadi 50000, "1jt" jadi 1000000.
+- Jenis Zakat Valid: "Fitrah", "Zakat Mal", "Zakat Profesi", "Infaq / Sedekah", "Fidyah", "Wakaf", "Donasi Palestina", "Palestina via Benwil", "Palestina via Bimbel".
+- Payment Method: Jika ada kata "transfer", "tf", "trf", "bsi", "mandiri", "bca", "bri" -> set "Transfer". Jika "tunai", "cash" -> set "Tunai". Default kosong string.
+
+Analisis input user dan map ke JSON berikut:
+{
+  "muzakki_name": string (Nama orang/hamba allah),
+  "zakat_type": string (Salah satu dari jenis valid, pilih yang paling mendekati),
+  "amount": int (Nominal dalam angka),
+  "description": string (Keterangan tambahan seperti 'via bsi', 'atas nama anak', dll),
+  "payment_method": string ("Transfer" atau "Tunai"),
+  "valid": boolean (true jika ini tentang setoran/laporan zakat, false jika chat biasa)
+}
+
+Contoh 1:
+Input: "Lapor min, ada zakat mal dari pak heri 500ribu via bsi"
+Output JSON: {"muzakki_name": "Pak Heri", "zakat_type": "Zakat Mal", "amount": 500000, "description": "via bsi", "payment_method": "Transfer", "valid": true}
+
+Contoh 2:
+Input: "Titipan hamba allah fitrah 50rb 2 orang"
+Output JSON: {"muzakki_name": "Hamba Allah", "zakat_type": "Fitrah", "amount": 50000, "description": "2 orang", "payment_method": "", "valid": true}
+
+Output HANYA JSON tanpa format markdown code block.`
+
+func (ai *AIClient) ExtractZakatData(text string) (*ExtractedZakat, error) {
+	// Create a specialized model instance or just use existing client with new chat
+	// We use the same model but start a fresh chat with specific instructions just for this turn
+	// Or easier: generate content with full prompt
+	
+	prompt := ZakatExtractionInstruction + "\n\nInput User: \"" + text + "\""
+	
+	resp, err := ai.extractionModel.GenerateContent(ai.ctx, genai.Text(prompt))
+	if err != nil {
+		return nil, err
+	}
+	
+	var resultStr strings.Builder
+	for _, part := range resp.Candidates[0].Content.Parts {
+		if textPart, ok := part.(genai.Text); ok {
+			resultStr.WriteString(string(textPart))
+		}
+	}
+	
+	// Clean markdown json if any
+	jsonStr := resultStr.String()
+	jsonStr = strings.TrimPrefix(jsonStr, "```json")
+	jsonStr = strings.TrimPrefix(jsonStr, "```")
+	jsonStr = strings.TrimSuffix(jsonStr, "```")
+	jsonStr = strings.TrimSpace(jsonStr)
+	
+	var extracted ExtractedZakat
+	if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
+		log.Printf("Failed to unmarshal extracted JSON: %v. Raw: %s", err, jsonStr)
+		return nil, err
+	}
+	
+	return &extracted, nil
 }

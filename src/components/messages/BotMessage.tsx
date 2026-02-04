@@ -71,7 +71,7 @@ const EditZakatModal: React.FC<{
                             <option value="Program Terikat Daerah">Program Terikat Daerah</option>
                             <option value="Wakaf">Wakaf</option>
                             <option value="Palestina">Palestina</option>
-                            <option value="Palestina via Benwil">Palestina via Benwil</option>
+                            <option value="Palestina via Benwil">Palestina via Bimbel</option>
                             <option value="Bencana Sumatera">Bencana Sumatera</option>
                         </select>
                     </div>
@@ -182,7 +182,7 @@ const ZakatDataTable: React.FC<{ data: Zakat[], currentUserRole?: 'admin' | 'use
 
     const filteredData = data.filter(zakat =>
         zakat.muzakkiName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        zakat.zakatType.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (zakat.zakatType === 'Palestina via Benwil' ? 'Palestina via Bimbel' : zakat.zakatType).toLowerCase().includes(searchTerm.toLowerCase()) ||
         (zakat.description || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (zakat.reconciled || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         zakat.amount.toString().includes(searchTerm) ||
@@ -210,7 +210,7 @@ const ZakatDataTable: React.FC<{ data: Zakat[], currentUserRole?: 'admin' | 'use
                 row.id,
                 `"${row.volunteerCode}"`,
                 `"${row.muzakkiName}"`,
-                `"${row.zakatType}"`,
+                `"${row.zakatType === 'Palestina via Benwil' ? 'Palestina via Bimbel' : row.zakatType}"`,
                 row.amount,
                 `"${row.proofOfTransfer}"`,
                 `"${new Date(row.createdAt).toLocaleDateString('id-ID')}"`
@@ -326,7 +326,9 @@ const ZakatDataTable: React.FC<{ data: Zakat[], currentUserRole?: 'admin' | 'use
                                 <td className="px-4 py-2 whitespace-nowrap text-sm text-white">{zakat.id}</td>
                                 <td className="px-4 py-2 whitespace-nowrap text-sm text-white">{zakat.volunteerCode}</td>
                                 <td className="px-4 py-2 whitespace-nowrap text-sm text-white">{zakat.muzakkiName}</td>
-                                <td className="px-4 py-2 whitespace-nowrap text-sm text-white">{zakat.zakatType}</td>
+                                <td className="px-4 py-2 whitespace-nowrap text-sm text-white">
+                                    {zakat.zakatType === 'Palestina via Benwil' ? 'Palestina via Bimbel' : zakat.zakatType}
+                                </td>
                                 <td className="px-4 py-2 whitespace-nowrap text-sm text-white">{zakat.description || '-'}</td>
                                 <td className="px-4 py-2 whitespace-nowrap text-sm text-white">
                                     {zakat.amount.toLocaleString('id-ID')}

@@ -87,6 +87,9 @@ const (
 	StateChangePasswordOld     UserState = "CHANGE_PASSWORD_OLD"
 	StateChangePasswordNew     UserState = "CHANGE_PASSWORD_NEW"
 	StateChangePasswordConfirm UserState = "CHANGE_PASSWORD_CONFIRM"
+
+	// Smart Bot (Extraction)
+	StateAIConfirmExtraction UserState = "AI_CONFIRM_EXTRACTION"
 )
 
 // ============================================
@@ -184,6 +187,17 @@ type LiveChatSession struct {
 type DailyUsage struct {
 	Date  string // YYYY-MM-DD
 	Count int
+}
+
+type ExtractedZakat struct {
+	MuzakkiName   string   `json:"muzakki_name"`
+	ZakatType     string   `json:"zakat_type"` // Must match ZakatTypes or be close
+	Amount        int      `json:"amount"`
+	Description   string   `json:"description"`
+	PaymentMethod string   `json:"payment_method"` // "Transfer" or "Tunai"
+	Confidence    string   `json:"confidence"`
+	MissingFields []string `json:"missing_fields"`
+	Valid         bool     `json:"valid"`
 }
 
 // ============================================

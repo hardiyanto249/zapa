@@ -271,7 +271,16 @@ func getLazInfo(lazName string) (string, error) {
 		}
 		return string(body), nil
 	}
+
 	return "Informasi LAZ tidak tersedia.", nil
+}
+
+func areLazNamesEquivalent(a, b string) bool {
+	a = strings.ToLower(strings.TrimSpace(a))
+	b = strings.ToLower(strings.TrimSpace(b))
+	if a == b { return true }
+	if (a == "rz" && b == "rumah zakat") || (a == "rumah zakat" && b == "rz") { return true }
+	return false
 }
 
 func getZakatRecords(currentUser *User) ([]Zakat, error) {
@@ -429,7 +438,7 @@ func getZakatRecords(currentUser *User) ([]Zakat, error) {
 			volUser, err := getUserProfile(z.VolunteerCode)
 			if err == nil {
 				// decrypt(volUser.LazName) is already done in getUserProfile
-				if volUser.LazName != currentUser.LazName {
+				if !areLazNamesEquivalent(volUser.LazName, currentUser.LazName) {
 					continue 
 				}
 			}
@@ -673,18 +682,19 @@ func getPendingChatRequests(currentUser *User) ([]ChatSession, error) {
 
 	if currentUser.VolunteerCode == "SUPER-ADMIN" {
 		rows, err = db.Query(`
-			SELECT s.id, s.user_volunteer_code, s.user_name, s.status, s.created_at 
+			SELECT s.id, s.user_volunteer_code, s.user_name, s.status, s.created_at, u.laz_name
 			FROM chat_sessions s
+			JOIN users u ON s.user_volunteer_code = u.volunteer_code
 			WHERE s.status = 'waiting' 
 			ORDER BY s.created_at ASC`)
 	} else {
-		// LAZ Admin sees only requests from their LAZ
+	// LAZ Admin sees only requests from their LAZ
 		rows, err = db.Query(`
-			SELECT s.id, s.user_volunteer_code, s.user_name, s.status, s.created_at 
+			SELECT s.id, s.user_volunteer_code, s.user_name, s.status, s.created_at, u.laz_name
 			FROM chat_sessions s
 			JOIN users u ON s.user_volunteer_code = u.volunteer_code
-			WHERE s.status = 'waiting' AND u.laz_name = $1
-			ORDER BY s.created_at ASC`, currentUser.LazName)
+			WHERE s.status = 'waiting'
+			ORDER BY s.created_at ASC`)
 	}
 	
 	if err != nil {
@@ -695,9 +705,23 @@ func getPendingChatRequests(currentUser *User) ([]ChatSession, error) {
 	sessions := []ChatSession{} // Initialize as empty array instead of nil
 	for rows.Next() {
 		var s ChatSession
-		if err := rows.Scan(&s.ID, &s.UserVolunteerCode, &s.UserName, &s.Status, &s.CreatedAt); err != nil {
+		var userLazName string
+		
+		if err := rows.Scan(&s.ID, &s.UserVolunteerCode, &s.UserName, &s.Status, &s.CreatedAt, &userLazName); err != nil {
 			return nil, err
 		}
+		
+		// Decrypt laz name
+		userLazName, _ = decrypt(userLazName)
+		
+		// Filter for specific LAZ admin
+		if currentUser.VolunteerCode != "SUPER-ADMIN" {
+			// normalized check
+			if strings.ToLower(userLazName) != strings.ToLower(currentUser.LazName) {
+				continue
+			}
+		}
+		
 		sessions = append(sessions, s)
 	}
 	return sessions, nil
@@ -1082,6 +1106,8 @@ func usersHandler(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
+			currentUser.Name, _ = decrypt(currentUser.Name)
+			currentUser.LazName, _ = decrypt(currentUser.LazName)
 		}
 	} else {
 		// Normal User Token Check
@@ -1090,6 +1116,8 @@ func usersHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
+		currentUser.Name, _ = decrypt(currentUser.Name)
+		currentUser.LazName, _ = decrypt(currentUser.LazName)
 	}
 
 	switch r.Method {
@@ -1171,6 +1199,8 @@ func zakatHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
+	currentUser.Name, _ = decrypt(currentUser.Name)
+	currentUser.LazName, _ = decrypt(currentUser.LazName)
 
 	switch r.Method {
 	case "GET":
@@ -1817,6 +1847,22 @@ func importVolunteersHandler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+
+		// Encrypt Name and LAZ
+		encName, err := encrypt(name)
+		if err != nil {
+			failCount++
+			errors = append(errors, fmt.Sprintf("Row %d: Encryption error (name)", i+1))
+			continue
+		}
+		
+		encLaz, err := encrypt(laz)
+		if err != nil {
+			failCount++
+			errors = append(errors, fmt.Sprintf("Row %d: Encryption error (laz)", i+1))
+			continue
+		}
+
 		// Insert/Update
 		_, err = db.Exec(`
 			INSERT INTO users (volunteer_code, password, name, laz_name, description, role, affiliate1, affiliate2, affiliate3)
@@ -1829,7 +1875,7 @@ func importVolunteersHandler(w http.ResponseWriter, r *http.Request) {
 				affiliate1 = $5,
 				affiliate2 = $6,
 				affiliate3 = $7
-		`, code, hashedPass, name, laz, aff1, aff2, aff3)
+		`, code, hashedPass, encName, encLaz, aff1, aff2, aff3)
 
 		if err != nil {
 			failCount++
@@ -1894,6 +1940,9 @@ func main() {
 	// Register File Serving Handlers on mux
 	mux.HandleFunc("/api/uploads/", handleServeFile)
 
+	// Register External Zakat Handler (for OpenClaw/Moltbolt)
+	mux.Handle("/api/external/zakat", botAuthMiddleware(http.HandlerFunc(externalZakatHandler)))
+
 	// Wrap mux with CORS
 	handler := corsMiddleware(mux)
 
@@ -1902,6 +1951,60 @@ func main() {
 	if err := http.ListenAndServe(":"+port, handler); err != nil {
 		log.Fatalf("Could not start server: %s\n", err)
 	}
+}
+
+// Handler untuk OpenClaw / AI Bot
+func externalZakatHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var payload struct {
+		VolunteerCode string `json:"volunteerCode"`
+		MuzakkiName   string `json:"muzakkiName"`
+		ZakatType     string `json:"zakatType"`
+		Amount        int    `json:"amount"` 
+		Description   string `json:"description"`
+		ProofURL      string `json:"proofUrl"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Basic Validation
+	if payload.VolunteerCode == "" || payload.Amount <= 0 {
+		http.Error(w, "VolunteerCode and Amount (positive) are required", http.StatusBadRequest)
+		return
+	}
+
+	// Default Description if empty
+	if payload.Description == "" {
+		payload.Description = "Input via Bot AI"
+	}
+
+	// Create Zakat Record
+	z := Zakat{
+		VolunteerCode:   payload.VolunteerCode,
+		MuzakkiName:     payload.MuzakkiName,
+		ZakatType:       payload.ZakatType,
+		Amount:          payload.Amount,
+		Description:     payload.Description,
+		ProofOfTransfer: payload.ProofURL, // Asumsi URL file sudah diupload
+		Reconciled:      "belum", 
+	}
+
+	created, err := addZakatRecord(z)
+	if err != nil {
+		log.Printf("Failed to add zakat from bot: %v", err)
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(created)
 }
 
 // Upload Handler

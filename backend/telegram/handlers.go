@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
@@ -41,6 +42,8 @@ func (z *ZapaBot) handleCommand(msg *tgbotapi.Message, session *UserSession) {
 		z.cmdBantuan(msg.Chat.ID, session)
 	case "profile":
 		z.cmdProfile(msg.Chat.ID, session)
+	case "lapor":
+		z.cmdLapor(msg, session) // Smart Bot Command
 	default:
 		// Check for quick update commands
 		if strings.HasPrefix(command, "rec") || strings.HasPrefix(command, "slip") || strings.HasPrefix(command, "ket") {
@@ -235,6 +238,89 @@ func (z *ZapaBot) cmdMenu(chatID int64, session *UserSession) {
 	z.sendMessage(chatID, text.String())
 }
 
+// ==================== SMART BOT (AI EXTRACTION) ====================
+
+func (z *ZapaBot) cmdLapor(msg *tgbotapi.Message, session *UserSession) {
+	if !z.requireAuth(msg.Chat.ID, session) {
+		return
+	}
+	
+	args := msg.CommandArguments()
+	if args == "" {
+		z.sendMessage(msg.Chat.ID, "📝 *Lapor Zakat (Smart)*\n\nSilakan ketik laporan Anda setelah perintah /lapor.\n\nContoh:\n`/lapor Pak Budi zakat mal 500rb transfer`\n`/lapor titipan hamba allah via bsi 100rb`")
+		return
+	}
+	
+	if z.ai == nil {
+		z.sendMessage(msg.Chat.ID, "❌ Fitur AI tidak tersedia saat ini.")
+		return
+	}
+	
+	// Send "Typing..." action
+	z.bot.Send(tgbotapi.NewChatAction(msg.Chat.ID, tgbotapi.ChatTyping))
+	
+	// Call AI Extraction
+	extracted, err := z.ai.ExtractZakatData(args)
+	if err != nil {
+		z.sendMessage(msg.Chat.ID, "❌ Maaf, saya gagal memproses laporan. Silakan coba lagi atau gunakan menu manual.")
+		log.Printf("AI Extraction error: %v", err)
+		return
+	}
+	
+	if !extracted.Valid {
+		z.sendMessage(msg.Chat.ID, "🤔 Saya tidak yakin ini laporan zakat. Mohon gunakan format yang lebih jelas atau gunakan menu /tambahzakat.")
+		return
+	}
+	
+	// Map extracted data to session
+	session.StateData = map[string]interface{}{
+		"zakat_entries": []ZakatEntry{},
+		"current_entry": ZakatEntry{
+			VolunteerCode: session.VolunteerCode,
+			MuzakkiName:   extracted.MuzakkiName,
+			ZakatType:     extracted.ZakatType,
+			Amount:        extracted.Amount,
+			Notes:         extracted.Description,
+			SlipKwitansi:  "tidak", // default
+		},
+	}
+	
+	// Handle Payment Method -> Slip Kwitansi inference
+	currentEntry := session.StateData["current_entry"].(ZakatEntry)
+	if strings.ToLower(extracted.PaymentMethod) == "transfer" {
+		// Usually transfer needs proof, but slip might be 'tidak' unless requested.
+		// Let's keep it default 'tidak'.
+	}
+	
+	session.StateData["current_entry"] = currentEntry
+	
+	// Ask for confirmation
+	session.State = StateAIConfirmExtraction
+	
+	displayType := extracted.ZakatType
+	if displayType == "Palestina via Benwil" {
+		displayType = "Palestina via Bimbel"
+	}
+	
+	text := fmt.Sprintf(`🤖 *Saya menangkap laporan zakat:*
+	
+👤 Muzakki: *%s*
+📋 Tipe: *%s*
+💰 Jumlah: *Rp %s*
+📝 Ket: *%s*
+
+Apakah data ini benar?`, extracted.MuzakkiName, displayType, formatRupiah(extracted.Amount), extracted.Description)
+
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		[]tgbotapi.InlineKeyboardButton{
+			tgbotapi.NewInlineKeyboardButtonData("✅ Ya, Benar", "ai_confirm:yes"),
+			tgbotapi.NewInlineKeyboardButtonData("❌ Salah", "ai_confirm:no"),
+		},
+	)
+	
+	z.sendMessageWithKeyboard(msg.Chat.ID, text, keyboard)
+}
+
 // ==================== ZAKAT COMMANDS ====================
 
 func (z *ZapaBot) cmdTambahZakat(chatID int64, session *UserSession) {
@@ -328,11 +414,16 @@ func (z *ZapaBot) showZakatPage(chatID int64, records []BackendZakat, page int, 
 		
 		// Show volunteer code for admin
 		if session.Role == "admin" {
-			text.WriteString(fmt.Sprintf("├ Kode: %s\n", r.VolunteerCode))
+			text.WriteString(fmt.Sprintf("├ Kode: %s\n", escapeMarkdown(r.VolunteerCode)))
 		}
 		
-		text.WriteString(fmt.Sprintf("├ Mzk: %s\n", r.MuzakkiName))
-		text.WriteString(fmt.Sprintf("├ Tipe: %s\n", r.ZakatType))
+		text.WriteString(fmt.Sprintf("├ Mzk: %s\n", escapeMarkdown(r.MuzakkiName)))
+		
+		displayType := r.ZakatType
+		if displayType == "Palestina via Benwil" {
+			displayType = "Palestina via Bimbel"
+		}
+		text.WriteString(fmt.Sprintf("├ Tipe: %s\n", escapeMarkdown(displayType)))
 		
 		status := "Belum"
 		if r.Reconciled == "sudah" { status = "Sudah ✅" }
@@ -343,7 +434,6 @@ func (z *ZapaBot) showZakatPage(chatID int64, records []BackendZakat, page int, 
 			text.WriteString(fmt.Sprintf("├ Rekonsil: %s\n", status))
 		}
 
-// ... (slip previous logic)
 		slip := r.SlipKwitansi
 		if slip == "" { slip = "tidak" }
 		
