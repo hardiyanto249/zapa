@@ -776,7 +776,7 @@ func getAdminActiveSessions(adminCode string) ([]ChatSession, error) {
 // callGemini function
 // callGemini function
 func callGemini(contents []map[string]interface{}, instruction string) (string, []map[string]interface{}, error) {
-	model := geminiClient.GenerativeModel("gemini-flash-latest")
+	model := geminiClient.GenerativeModel("gemini-1.5-flash")
 
 	// Konfigurasi tools yang bisa dipanggil AI
 	model.Tools = []*genai.Tool{
@@ -902,7 +902,7 @@ func callGemini(contents []map[string]interface{}, instruction string) (string, 
 
 // Fungsi untuk menganalisis teks dan menjawab pertanyaan
 func synthesizeAnswerFromContext(question, contextText string) (string, error) {
-	model := geminiClient.GenerativeModel("gemini-flash-latest")
+	model := geminiClient.GenerativeModel("gemini-1.5-flash")
 
 	// Buat prompt yang meminta AI untuk menjawab berdasarkan konteks
 	prompt := fmt.Sprintf(

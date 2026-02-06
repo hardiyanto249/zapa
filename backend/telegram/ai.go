@@ -57,13 +57,13 @@ func NewAIClient(apiKey string) (*AIClient, error) {
 	}
 
 	// Primary model for Conversation (Question Answering) - Gemini 2.5 Flash
-	model := client.GenerativeModel("gemini-2.5-flash")
+	model := client.GenerativeModel("gemini-1.5-flash")
 	model.SystemInstruction = &genai.Content{
 		Parts: []genai.Part{genai.Text(ZakatSystemInstruction)},
 	}
 
 	// Secondary model for Extraction (Robustness) - Gemini 1.5 Flash
-	extractionModel := client.GenerativeModel("gemini-pro")
+	extractionModel := client.GenerativeModel("gemini-1.5-flash")
 	// No system instruction needed here as it's included in the prompt
 	
 	return &AIClient{
